@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { getConnInfo } from 'hono/bun';
-import { PlaudEnrollment } from '../sync/plaud-enrollment';
+import { PlaudEnrollment, type ApprovedPhone } from '../sync/plaud-enrollment';
 import { loadIdentity } from '../sync/plaud-direct';
 import { plaudTransfers } from '../sync/plaud-transfers';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -45,7 +45,16 @@ app.patch('/auto-import', async c => {
     return c.json({ success: true, data: automaticPlaud.set(input.enabled) }); }
   catch (e) { return c.json({ success: false, error: (e as Error).message }, 400); }
 });
-const enrollment = new PlaudEnrollment(loadIdentity);
+// Phones approved for recorder access, listed on the Phone page. Approval hands the phone a copy of
+// the recorder key; removing a phone here only forgets it, the phone keeps the key until unlinked.
+const approvedPhonesKey = 'plaud.approvedPhones';
+const approvedPhones = (): ApprovedPhone[] => {
+  const row = sqlite.query('SELECT value FROM user_settings WHERE key = ?').get(approvedPhonesKey) as { value: string } | null;
+  try { return row ? JSON.parse(row.value) : []; } catch { return []; }
+};
+const saveApprovedPhones = (phones: ApprovedPhone[]) => sqlite.query("INSERT INTO user_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')")
+  .run(approvedPhonesKey, JSON.stringify(phones));
+const enrollment = new PlaudEnrollment(loadIdentity, undefined, phone => saveApprovedPhones([...approvedPhones(), phone]));
 app.use('/authorizations/*', async (c, next) => { c.header('Cache-Control', 'no-store'); return next(); });
 const localOwner = (c: Parameters<typeof getConnInfo>[0]) => {
   try { return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(getConnInfo(c).remote.address ?? ''); } catch { return false; }
@@ -65,6 +74,12 @@ app.post('/authorizations/:id/approve', async c => {
   try { const body = await c.req.json(); if (body.confirm !== true || typeof body.code !== 'string') throw new Error('Enter the verification code shown on your phone.');
     return c.json({ success: true, data: await enrollment.approve(c.req.param('id'), body.code) }); }
   catch (e) { return c.json({ success: false, error: (e as Error).message }, 400); }
+});
+app.get('/approved-phones', c => localOwner(c) ? c.json({ success: true, data: approvedPhones() }) : c.json({ success: false, error: 'Open the phone list on the desktop.' }, 403));
+app.delete('/approved-phones/:id', c => {
+  if (!localOwner(c)) return c.json({ success: false, error: 'Use the desktop to change the phone list.' }, 403);
+  saveApprovedPhones(approvedPhones().filter(phone => phone.id !== c.req.param('id')));
+  return c.json({ success: true, data: { removed: true } });
 });
 app.post('/authorizations/:id/acknowledge', c => c.json({ success: true, data: enrollment.remove(c.req.param('id')) }));
 app.delete('/authorizations/:id', c => localOwner(c) ? c.json({ success: true, data: enrollment.remove(c.req.param('id')) }) : c.json({ success: false, error: 'Use the desktop to decline authorization.' }, 403));

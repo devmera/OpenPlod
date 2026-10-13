@@ -616,3 +616,8 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
   .processing-bars i, .processing-chip i { animation: none; }
   .processing-bars i { transform: scaleY(0.6); }
 }
+
+/* Phones approved for recorder access, under the pairing controls. */
+.approved-phones { display: grid; gap: 4px; margin-top: 18px; }
+.approved-phones h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--muted-foreground); }
+.approved-phone-icon { width: 18px; height: 18px; color: var(--success, #22c55e); }

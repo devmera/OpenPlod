@@ -118,6 +118,28 @@ async fn open(link: &mut Foreign, key: &Key) -> anyhow::Result<(plaud_protocol::
     Ok((session, port))
 }
 
+/// What the recorder is doing, for the app to show and to know when a recording has stopped.
+#[derive(uniffi::Enum, PartialEq, Eq)]
+pub enum RecorderActivity {
+    Idle,
+    Recording,
+    /// Transferring, switching on/off, or unknown.
+    Busy,
+}
+
+/// Asks the connected recorder what it is doing; changes nothing on it.
+#[uniffi::export(async_runtime = "tokio")]
+pub async fn recorder_activity(key: RecorderKey, transport: Arc<dyn RecorderTransport>) -> Result<RecorderActivity, CompanionError> {
+    let key = decode(&key)?;
+    let mut link = Foreign { transport, timeout_ms: 5000 };
+    let (mut session, _) = open(&mut link, &key).await?;
+    Ok(match driver::state(&mut link, &mut session).await? {
+        driver::DeviceState::Idle => RecorderActivity::Idle,
+        driver::DeviceState::Recording => RecorderActivity::Recording,
+        driver::DeviceState::Other => RecorderActivity::Busy,
+    })
+}
+
 /// Recordings stored on the connected recorder.
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn list_recordings(key: RecorderKey, transport: Arc<dyn RecorderTransport>, timeout_secs: u64) -> Result<Vec<RecorderFile>, CompanionError> {

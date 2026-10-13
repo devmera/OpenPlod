@@ -25,6 +25,7 @@ The Mac release uses Bun's compiled runtime and a Tauri native shell. ffmpeg/ffp
 ## Workspace Images
 
 - `web/public/plaud-note-pro.png`: official Plaud Note Pro product photograph, retrieved from the [Plaud storefront CDN](https://cdn.shopify.com/s/files/1/0918/0171/5051/files/NotePro-_-2_fdc31980-a483-420d-b385-3723c698c9b7.png?v=1779783768&width=240). Cropped to remove transparent padding. Copyright remains with its owner; used to identify the supported device, not as original OpenPlod artwork. No broader redistribution license is asserted.
+- `ios/Companion/Sources/Assets.xcassets/NotePro.imageset/notepro.png`: the same official Plaud Note Pro product photograph, retrieved at 720 px width from the same Plaud storefront CDN URL and cropped; used in the iOS companion to identify the supported device. Copyright remains with its owner; no broader redistribution license is asserted.
 - `web/public/mountains.jpg`: mountain photograph from [Unsplash](https://images.unsplash.com/photo-1464822759023-fed622ff2c3b), used under the [Unsplash license](https://unsplash.com/license). Displayed as a subdued workspace footer background.
 
 ## Trademarks

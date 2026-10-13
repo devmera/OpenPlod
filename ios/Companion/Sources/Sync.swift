@@ -17,6 +17,18 @@ final class SyncEngine: ObservableObject {
     @Published private(set) var running = false
     @Published private(set) var summary: String?
     @Published private(set) var lastSync: Date? = UserDefaults.standard.object(forKey: "lastSync") as? Date
+    /// The recorder reported it is recording; syncing waits until it stops.
+    @Published private(set) var recorderRecording = false
+
+    /// A recording seen on the recorder, and where it is now.
+    struct LibraryItem: Codable, Identifiable, Equatable {
+        enum Place: String, Codable { case nas, recorder, otherKey }
+        let id: UInt32
+        let size: UInt32
+        var place: Place
+        var date: Date { Date(timeIntervalSince1970: TimeInterval(id)) }
+    }
+    @Published private(set) var library: [LibraryItem] = (try? JSONDecoder().decode([LibraryItem].self, from: UserDefaults.standard.data(forKey: "library") ?? Data())) ?? []
 
     /// Guards against back-to-back syncs from repeated triggers; short, because iOS reports a
     /// continuously advertising recorder only once and a dropped report is not repeated.
@@ -110,11 +122,13 @@ final class SyncEngine: ObservableObject {
                 RecorderBluetooth.shared.disconnect(connection)
                 throw error
             }
+            recorderRecording = outcome.recording
             // Never fetch a recording that is still being made; the next wake-up after it stops will.
             if outcome.recording && localFiles().isEmpty {
                 summary = "The recorder is recording. It will sync when the recording is done."
                 return 0
             }
+            if !outcome.recording { remember(outcome.files, key: key) }
             for file in localFiles() {
                 guard let session = UInt32(file.deletingPathExtension().lastPathComponent) else { continue }
                 if !items.contains(where: { $0.id == session }) { items.append(Item(id: session, phase: .downloaded)) }
@@ -126,6 +140,7 @@ final class SyncEngine: ObservableObject {
                     try await nas.upload(file: sidecar, as: sidecar.lastPathComponent)
                     try await nas.upload(file: file, as: name)
                     markUploaded(key.serial, session)
+                    place(session, .nas)
                     try? FileManager.default.removeItem(at: file)
                     try? FileManager.default.removeItem(at: sidecar)
                     set(session, .done); uploadedCount += 1
@@ -145,6 +160,36 @@ final class SyncEngine: ObservableObject {
         return uploadedCount
     }
 
+    /// While recording, the app checks every 30 s whether it stopped, then syncs.
+    func checkWhileRecording() async {
+        guard recorderRecording, !running, let key = KeyStore.load() else { return }
+        do {
+            let connection = try await RecorderBluetooth.shared.connect(within: 10)
+            let activity = try await recorderActivity(key: key, transport: connection)
+            RecorderBluetooth.shared.disconnect(connection)
+            if activity != .recording {
+                recorderRecording = false
+                lastAttempt = nil
+                appOpened()
+            }
+        } catch {}
+    }
+
+    private func remember(_ files: [RecorderFile], key: RecorderKey) {
+        let done = uploaded(key.serial), other = unreadable(key)
+        library = files.map { file in
+            LibraryItem(id: file.sessionId, size: file.size,
+                        place: done.contains(file.sessionId) ? .nas : other.contains(file.sessionId) ? .otherKey : .recorder)
+        }.sorted { $0.id > $1.id }
+        saveLibrary()
+    }
+
+    private func place(_ id: UInt32, _ place: LibraryItem.Place) {
+        if let index = library.firstIndex(where: { $0.id == id }) { library[index].place = place; saveLibrary() }
+    }
+
+    private func saveLibrary() { UserDefaults.standard.set(try? JSONEncoder().encode(library), forKey: "library") }
+
     private func progress(_ key: RecorderKey, _ id: UInt32, _ state: String, _ detail: String?) {
         if !items.contains(where: { $0.id == id }) { items.append(Item(id: id, phase: .waiting)) }
         switch state {
@@ -152,7 +197,7 @@ final class SyncEngine: ObservableObject {
         case "saved": set(id, .downloaded)
         default:
             // Made while the recorder was bound to another key: it can never be decrypted here.
-            if detail?.contains("decrypting") == true { markUnreadable(key, id); set(id, .unreadable) }
+            if detail?.contains("decrypting") == true { markUnreadable(key, id); set(id, .unreadable); place(id, .otherKey) }
             else { set(id, .failed(detail ?? "Download failed")) }
         }
     }

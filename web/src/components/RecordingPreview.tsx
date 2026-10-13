@@ -549,6 +549,8 @@ export function RecordingPreview({
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {recording.summary}
               </ReactMarkdown>
+            ) : processing ? (
+              <ProcessingState processing={processing} compact />
             ) : (
               <div className="preview-empty">
                 <AlignLeft />

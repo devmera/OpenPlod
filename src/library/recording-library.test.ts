@@ -225,7 +225,8 @@ describe('meeting capture', () => {
     expect(Bun.spawnSync(['/usr/bin/afconvert', '-f', 'caff', '-d', 'LEI16@48000', '-c', '2', '/System/Library/Sounds/Glass.aiff', caf]).exitCode).toBe(0);
 
     const startedAt = new Date(1760356920000);
-    const result = await finalizeMeeting({ path: caf, app: { id: 'zoom', name: 'Zoom' }, startedAt, durationSeconds: 4 });
+    const result = await finalizeMeeting({ path: caf, app: { id: 'zoom', name: 'Zoom' }, startedAt, durationSeconds: 4,
+      marks: [{ seconds: 1.5, note: 'Decision on pricing' }, { seconds: 99, note: '  ' }] });
 
     const [row] = await db.select().from(recordings).where(eq(recordings.id, result.recordingId));
     expect(row).toMatchObject({
@@ -239,6 +240,8 @@ describe('meeting capture', () => {
     const info = Bun.spawnSync(['/usr/bin/afinfo', row.filePath]).stdout.toString();
     expect(info).toContain('aac');
     expect(info).toContain('2 ch');
+    const bookmarks = sqlite.query('SELECT seconds,label FROM recording_bookmarks WHERE recording_id=? ORDER BY seconds').all(result.recordingId);
+    expect(bookmarks).toEqual([{ seconds: 1.5, label: 'Decision on pricing' }, { seconds: 3.5, label: 'Marked moment' }]);
   });
 });
 

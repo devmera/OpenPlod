@@ -1,8 +1,10 @@
 import type { Database } from 'bun:sqlite';
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { importRecordingFile, incomingDirectory } from '../library/recording-library';
 import { queueRecordingProcessing } from '../library/processing';
+import { RecordingBookmarks } from '../library/bookmarks';
+import { sqlite } from '../db/client';
 
 /**
  * Meeting recording on the Mac (roadmap: automatic capture next to Plaud imports).
@@ -32,14 +34,18 @@ export type BridgeEvent =
   | { event: 'apps'; apps: MeetingApp[] }
   | { event: 'started'; path: string }
   | { event: 'stopped'; path: string; durationSeconds: number; reason: string }
+  | { event: 'mark'; path: string; seconds: number; note: string }
   | { event: 'error'; message: string }
   | { event: 'exit' };
 
 export interface MeetingBridge {
-  start(path: string, label: string): void;
+  start(path: string, label: string, options: { bar: boolean }): void;
   stop(): void;
   close(): void;
 }
+
+/** A moment marked from the floating bar, kept beside the capture until it becomes a bookmark. */
+export type MeetingMark = { seconds: number; note: string };
 
 export type MeetingImport = { recordingId: string; title: string; app: string | null; durationSeconds: number; importedAt: string };
 
@@ -49,6 +55,7 @@ export type MeetingStatus = {
   available: boolean;
   reason: string | null;
   autoRecord: boolean;
+  floatingBar: boolean;
   enabledApps: string[];
   apps: (MeetingApp & { enabled: boolean; active: boolean })[];
   recording: null | { app: MeetingApp | null; startedAt: string; starting: boolean };
@@ -70,7 +77,7 @@ export type MeetingDependencies = {
   /** Spawns the helper; returns null when it is not installed on this machine. */
   spawnBridge: (onEvent: (event: BridgeEvent) => void) => MeetingBridge | null;
   /** Converts, imports and queues processing for a finished file. */
-  finalize: (params: { path: string; app: MeetingApp | null; startedAt: Date; durationSeconds: number }) => Promise<MeetingImport | null>;
+  finalize: (params: { path: string; app: MeetingApp | null; startedAt: Date; durationSeconds: number; marks: MeetingMark[] }) => Promise<MeetingImport | null>;
   stagingDirectory: () => string;
   now?: () => number;
 };
@@ -108,6 +115,7 @@ export class MeetingRecorder {
       ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`).run(key, value);
   }
   autoRecord() { return this.setting('meetingAutoRecord') === 'true'; }
+  floatingBar() { return this.setting('meetingFloatingBar') !== 'false'; }
   enabledApps(): string[] {
     try {
       const parsed = JSON.parse(this.setting('meetingApps') ?? 'null');
@@ -115,7 +123,8 @@ export class MeetingRecorder {
     } catch { /* fall through to every app */ }
     return MEETING_APPS.map(app => app.id);
   }
-  configure(input: { autoRecord?: boolean; enabledApps?: string[] }) {
+  configure(input: { autoRecord?: boolean; floatingBar?: boolean; enabledApps?: string[] }) {
+    if (input.floatingBar !== undefined) this.save('meetingFloatingBar', String(input.floatingBar));
     if (input.autoRecord !== undefined) {
       if (input.autoRecord) this.ensureBridge();
       if (input.autoRecord && this.unavailable) throw new Error(this.unavailable);
@@ -214,7 +223,7 @@ export class MeetingRecorder {
     this.active = { app, path, startedAt, recording: false };
     this.lastSeen = startedAt;
     this.error = null;
-    this.bridge!.start(path, app?.name ?? 'meeting');
+    this.bridge!.start(path, app?.name ?? 'meeting', { bar: this.floatingBar() });
   }
 
   // ---- helper events ---------------------------------------------------------
@@ -229,11 +238,16 @@ export class MeetingRecorder {
       case 'stopped': {
         const active = this.active?.path === event.path ? this.active : null;
         this.active = null;
-        if (active?.app && (event.reason === 'notification' || event.reason === 'sleep')
+        if (active?.app && ['notification', 'bar', 'sleep'].includes(event.reason)
           && this.detected.some(app => app.id === active.app!.id)) this.suppressed = active.app.id;
         this.enqueueFinalize(event.path, active?.app ?? appFromStagingName(event.path), new Date(active?.startedAt ?? this.now()), event.durationSeconds);
         break;
       }
+      case 'mark':
+        if (this.active?.path === event.path && Number.isFinite(event.seconds) && event.seconds >= 0) {
+          appendMark(event.path, { seconds: event.seconds, note: String(event.note ?? '').slice(0, 160) });
+        }
+        break;
       case 'error':
         this.error = event.message;
         // A failed start: don't retry the same call every two seconds.
@@ -259,9 +273,9 @@ export class MeetingRecorder {
   private enqueueFinalize(path: string, app: MeetingApp | null, startedAt: Date, durationSeconds: number | null) {
     this.finalizing = this.finalizing.then(async () => {
       const seconds = durationSeconds ?? estimateCafSeconds(path);
-      if (seconds < MIN_DURATION_SECONDS) { removeQuietly(path); return; }
+      if (seconds < MIN_DURATION_SECONDS) { removeQuietly(path); removeQuietly(marksPath(path)); return; }
       try {
-        const imported = await this.deps.finalize({ path, app, startedAt, durationSeconds: seconds });
+        const imported = await this.deps.finalize({ path, app, startedAt, durationSeconds: seconds, marks: readMarks(path) });
         if (imported) this.deps.database.query('INSERT OR IGNORE INTO meeting_imports VALUES (?,?,?,?,?)')
           .run(imported.recordingId, imported.title, imported.app, imported.durationSeconds, imported.importedAt);
         this.deps.database.query('DELETE FROM meeting_imports WHERE recording_id NOT IN (SELECT recording_id FROM meeting_imports ORDER BY imported_at DESC LIMIT 20)').run();
@@ -296,6 +310,7 @@ export class MeetingRecorder {
       available: Boolean(this.bridge),
       reason: this.bridge ? null : this.unavailable ?? 'The meeting recorder is restarting.',
       autoRecord: this.autoRecord(),
+      floatingBar: this.floatingBar(),
       enabledApps: [...enabled],
       apps: MEETING_APPS.map(app => ({ ...app, enabled: enabled.has(app.id), active: detected.has(app.id) })),
       recording: this.active ? { app: this.active.app, startedAt: new Date(this.active.startedAt).toISOString(), starting: !this.active.recording } : null,
@@ -309,6 +324,18 @@ export class MeetingRecorder {
 function appFromStagingName(path: string): MeetingApp | null {
   const id = path.split('/').pop()?.replace(/\.caf$/, '').split('-').slice(1).join('-');
   return MEETING_APPS.find(app => app.id === id) ?? null;
+}
+
+/** Marks live beside the capture so a crash mid-meeting keeps them for recovery. */
+const marksPath = (capture: string) => `${capture}.marks.json`;
+function readMarks(capture: string): MeetingMark[] {
+  try {
+    const parsed = JSON.parse(readFileSync(marksPath(capture), 'utf8'));
+    return Array.isArray(parsed) ? parsed.filter((mark): mark is MeetingMark => typeof mark?.seconds === 'number' && typeof mark?.note === 'string') : [];
+  } catch { return []; }
+}
+function appendMark(capture: string, mark: MeetingMark) {
+  writeFileSync(marksPath(capture), JSON.stringify([...readMarks(capture), mark]), { mode: 0o600 });
 }
 
 function removeQuietly(path: string) { try { unlinkSync(path); } catch { /* already gone */ } }
@@ -356,7 +383,7 @@ export function spawnMeetingBridge(onEvent: (event: BridgeEvent) => void): Meeti
     }
   })().finally(() => { void child.exited.then(() => onEvent({ event: 'exit' })); });
   return {
-    start: (path, label) => send({ cmd: 'start', path, label }),
+    start: (path, label, options) => send({ cmd: 'start', path, label, bar: options.bar }),
     stop: () => send({ cmd: 'stop' }),
     // Closing stdin lets the helper finish an open file before it exits.
     close: () => { try { child.stdin.end(); } catch { /* already closed */ } },
@@ -368,7 +395,7 @@ export function meetingStagingDirectory() {
 }
 
 /** Converts the PCM capture to AAC, imports it into the vault and queues processing. */
-export async function finalizeMeeting(params: { path: string; app: MeetingApp | null; startedAt: Date; durationSeconds: number }): Promise<MeetingImport> {
+export async function finalizeMeeting(params: { path: string; app: MeetingApp | null; startedAt: Date; durationSeconds: number; marks: MeetingMark[] }): Promise<MeetingImport> {
   const m4a = params.path.replace(/\.caf$/, '.m4a');
   const convert = Bun.spawn(['/usr/bin/afconvert', '-f', 'm4af', '-d', 'aac', params.path, m4a], { stdout: 'ignore', stderr: 'pipe' });
   if (await convert.exited !== 0) {
@@ -387,9 +414,20 @@ export async function finalizeMeeting(params: { path: string; app: MeetingApp | 
       durationMs: Math.round(params.durationSeconds * 1000),
     },
   });
-  if (added) await queueRecordingProcessing({ recordingId: recording.id, filePath: recording.filePath });
+  if (added) {
+    const bookmarks = new RecordingBookmarks(sqlite);
+    for (const mark of params.marks) {
+      bookmarks.add(recording.id, {
+        id: crypto.randomUUID(),
+        seconds: Math.min(Math.max(0, mark.seconds), Math.max(0, params.durationSeconds - 0.5)),
+        label: mark.note.trim() || 'Marked moment',
+      });
+    }
+    await queueRecordingProcessing({ recordingId: recording.id, filePath: recording.filePath });
+  }
   removeQuietly(m4a);
   removeQuietly(params.path);
+  removeQuietly(marksPath(params.path));
   return { recordingId: recording.id, title, app: params.app?.name ?? null, durationSeconds: params.durationSeconds, importedAt: new Date().toISOString() };
 }
 

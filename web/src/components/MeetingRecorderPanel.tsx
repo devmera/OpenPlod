@@ -50,23 +50,12 @@ export function MeetingRecorderPanel() {
           <p className="text-sm text-muted-foreground">{status.reason}</p>
         ) : (
           <>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">Record meetings automatically</p>
-                <p className="text-xs text-muted-foreground">Starts when a selected app uses the microphone for a few seconds; stops when the call ends.</p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={status.autoRecord}
-                aria-label="Record meetings automatically"
-                disabled={busy}
-                onClick={() => void run(() => api.updateMeetingSettings({ autoRecord: !status.autoRecord }))}
-                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${status.autoRecord ? 'bg-primary' : 'bg-secondary'}`}
-              >
-                <span className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform shadow-sm ${status.autoRecord ? 'translate-x-5' : ''}`} />
-              </button>
-            </div>
+            <MeetingSwitch label="Record meetings automatically" busy={busy} checked={status.autoRecord}
+              description="Starts when a selected app uses the microphone for a few seconds; stops when the call ends."
+              onChange={autoRecord => void run(() => api.updateMeetingSettings({ autoRecord }))} />
+            <MeetingSwitch label="Show floating bar while recording" busy={busy} checked={status.floatingBar}
+              description="A small bar above all windows with a level meter, Stop, and a pen to mark moments as bookmarks."
+              onChange={floatingBar => void run(() => api.updateMeetingSettings({ floatingBar }))} />
 
             <div>
               <p className="text-sm font-medium">Apps</p>
@@ -107,6 +96,21 @@ export function MeetingRecorderPanel() {
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function MeetingSwitch({ label, description, checked, busy, onChange }: { label: string; description: string; checked: boolean; busy: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div>
+        <p className="text-sm font-medium">{label}</p>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={busy} onClick={() => onChange(!checked)}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${checked ? 'bg-primary' : 'bg-secondary'}`}>
+        <span className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform shadow-sm ${checked ? 'translate-x-5' : ''}`} />
+      </button>
+    </div>
   )
 }
 

@@ -13,7 +13,7 @@ function setup(options: { autoRecord?: boolean; available?: boolean } = {}) {
   const staging = mkdtempSync(join(tmpdir(), 'openplod-meetings-'));
   let clock = 1_000_000;
   const commands: string[] = [];
-  const finalized: { path: string; app: MeetingApp | null; startedAt: Date; durationSeconds: number }[] = [];
+  const finalized: { path: string; app: MeetingApp | null; startedAt: Date; durationSeconds: number; marks: { seconds: number; note: string }[] }[] = [];
   let emit: (event: BridgeEvent) => void = () => {};
   const recorder = new MeetingRecorder({
     database,
@@ -22,7 +22,7 @@ function setup(options: { autoRecord?: boolean; available?: boolean } = {}) {
     spawnBridge: onEvent => {
       if (options.available === false) return null;
       emit = onEvent;
-      return { start: (path, label) => commands.push(`start ${label} ${path}`), stop: () => commands.push('stop'), close: () => commands.push('close') };
+      return { start: (path, label, options) => commands.push(`start ${label}${options.bar ? '' : ' (no bar)'} ${path}`), stop: () => commands.push('stop'), close: () => commands.push('close') };
     },
     finalize: async params => {
       finalized.push(params);
@@ -184,4 +184,31 @@ test('turning on automatic recording without the helper explains why', () => {
 test('titles are readable and filename-safe', () => {
   expect(meetingTitle(zoom, new Date(2026, 9, 13, 14, 2))).toBe('Zoom meeting 13 Oct 2026 14.02');
   expect(meetingTitle(null, new Date(2026, 0, 2, 9, 5))).toBe('Meeting 2 Jan 2026 09.05');
+});
+
+test('marks from the floating bar travel with the capture into the import', async () => {
+  const { recorder, finalized, advance, emit, lastStartPath } = setup({ autoRecord: true });
+  emit({ event: 'apps', apps: [zoom] });
+  advance(START_AFTER_MS);
+  const path = lastStartPath();
+  emit({ event: 'started', path });
+  emit({ event: 'mark', path, seconds: 42, note: 'Action item' });
+  emit({ event: 'mark', path: '/somewhere/else.caf', seconds: 1, note: 'ignored' });
+  emit({ event: 'mark', path, seconds: 90, note: '' });
+  expect(existsSync(`${path}.marks.json`)).toBe(true);
+  emit({ event: 'stopped', path, durationSeconds: 120, reason: 'bar' });
+  await recorder.settled();
+  expect(finalized[0].marks).toEqual([{ seconds: 42, note: 'Action item' }, { seconds: 90, note: '' }]);
+  // Stopping from the bar mid-call skips the rest of that call, like the notification.
+  advance(START_AFTER_MS * 10);
+  expect(recorder.status().recording).toBeNull();
+});
+
+test('the floating bar can be turned off', () => {
+  const { recorder, commands, advance, emit } = setup({ autoRecord: true });
+  expect(recorder.status().floatingBar).toBe(true);
+  recorder.configure({ floatingBar: false });
+  emit({ event: 'apps', apps: [zoom] });
+  advance(START_AFTER_MS);
+  expect(commands[0]).toStartWith('start Zoom (no bar) ');
 });

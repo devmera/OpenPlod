@@ -4,6 +4,7 @@ import type { MeetingRecorder } from '../meetings/meeting-recorder';
 
 const settingsInput = z.object({
   autoRecord: z.boolean().optional(),
+  floatingBar: z.boolean().optional(),
   enabledApps: z.array(z.string().max(40)).max(40).optional(),
 }).strict();
 

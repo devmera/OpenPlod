@@ -559,6 +559,12 @@ export const api = {
     return res.data.map(mapRecording)
   },
 
+  // Cheap change probe for the library: row count plus the newest row's id.
+  getRecordingsVersion: async (retention: string): Promise<string> => {
+    const res = await fetchJSON<ApiEnvelope<RawRecording[]> & { pagination: { total: number } }>(`/recordings?retention=${retention}&limit=1`)
+    return `${res.pagination.total}:${res.data[0]?.id ?? ''}`
+  },
+
   getRecording: async (id: string): Promise<Recording> => {
     const res = await fetchJSON<ApiEnvelope<RawRecording>>(`/recordings/${id}`)
     return mapRecording(res.data)

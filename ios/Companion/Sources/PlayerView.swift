@@ -1,4 +1,5 @@
 import AVFoundation
+import MediaPlayer
 import SwiftUI
 
 /// Plays one recording: from the phone if a copy is here, otherwise fetched from the NAS and cached.
@@ -13,8 +14,14 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var player: AVAudioPlayer?
     private var timer: Timer?
 
+    private var title = "Recording"
+    private var commandsReady = false
+
     /// Session setup and file opening run off the main thread, so expanding a row stays smooth.
-    func load(_ url: URL) async throws {
+    /// `title` is what the lock screen and Dynamic Island show.
+    func load(_ url: URL, title: String) async throws {
+        self.title = title
+        setUpRemoteCommands()
         let rate = rate
         let prepared: AVAudioPlayer = try await Task.detached(priority: .userInitiated) {
             // Plays with the silent switch on and keeps going with the screen locked.
@@ -30,22 +37,65 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         player = prepared
         duration = prepared.duration
         time = 0
+        updateNowPlaying()
+    }
+
+    /// Lock screen, Control Center and Dynamic Island show the recording while it plays.
+    private func updateNowPlaying() {
+        guard let player else { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil; return }
+        var info: [String: Any] = [
+            MPMediaItemPropertyTitle: title,
+            MPMediaItemPropertyArtist: "Plaud Note Pro",
+            MPMediaItemPropertyPlaybackDuration: player.duration,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: player.currentTime,
+            MPNowPlayingInfoPropertyPlaybackRate: player.isPlaying ? Double(player.rate) : 0,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0,
+        ]
+        if let image = UIImage(named: "NotePro") {
+            info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+
+    private func setUpRemoteCommands() {
+        guard !commandsReady else { return }
+        commandsReady = true
+        let center = MPRemoteCommandCenter.shared()
+        center.playCommand.addTarget { [weak self] _ in self?.remote { if !$0.playing { $0.toggle() } }; return .success }
+        center.pauseCommand.addTarget { [weak self] _ in self?.remote { if $0.playing { $0.toggle() } }; return .success }
+        center.togglePlayPauseCommand.addTarget { [weak self] _ in self?.remote { $0.toggle() }; return .success }
+        center.skipForwardCommand.preferredIntervals = [15]
+        center.skipBackwardCommand.preferredIntervals = [15]
+        center.skipForwardCommand.addTarget { [weak self] _ in self?.remote { $0.seek(to: $0.time + 15) }; return .success }
+        center.skipBackwardCommand.addTarget { [weak self] _ in self?.remote { $0.seek(to: $0.time - 15) }; return .success }
+        center.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+            self?.remote { $0.seek(to: event.positionTime) }
+            return .success
+        }
+    }
+
+    private nonisolated func remote(_ action: @escaping @MainActor (AudioPlayer) -> Void) {
+        Task { @MainActor in action(self) }
     }
 
     func toggle() {
         guard let player else { return }
         if player.isPlaying { player.pause(); stopTimer() } else { player.play(); startTimer() }
         playing = player.isPlaying
+        updateNowPlaying()
     }
 
     func seek(to seconds: TimeInterval) {
         guard let player else { return }
         player.currentTime = min(max(0, seconds), duration)
         time = player.currentTime
+        updateNowPlaying()
     }
 
     func stop() {
         player?.stop(); player = nil; stopTimer()
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         if playing { playing = false }
         if time != 0 { time = 0 }
     }
@@ -115,7 +165,11 @@ struct InlinePlayer: View {
         .padding(.top, 4)
         .task(id: item.id) {
             loading = true; failure = nil
-            do { try await player.load(try await SyncEngine.shared.playableFile(for: item)); player.toggle() }
+            do {
+                let title = "Recording " + item.date.formatted(date: .abbreviated, time: .shortened)
+                try await player.load(try await SyncEngine.shared.playableFile(for: item), title: title)
+                player.toggle()
+            }
             catch { failure = error.localizedDescription }
             loading = false
         }

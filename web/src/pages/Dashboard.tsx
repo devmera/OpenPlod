@@ -51,6 +51,7 @@ import { BatchTranscribe } from '@/components/BatchTranscribe'
 import { useLibraryChanges } from "@/lib/library-changes";
 import { ProcessingChip } from '@/components/ProcessingState';
 import { useProcessingStages } from '@/lib/processing';
+import { BulkActions, type BulkAction, type BulkProgress } from '@/components/BulkActions'
 
 export function Dashboard() {
   const [recordings, setRecordings] = useState<Recording[]>([]),
@@ -170,6 +171,79 @@ export function Dashboard() {
   );
   const activeId =
     filtered.find((row) => row.id === selected)?.id || filtered[0]?.id;
+  // Multi-select: checkboxes, ⌘/Ctrl-click to toggle, Shift-click for a range, Esc to clear.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [bulk, setBulk] = useState<BulkProgress | null>(null);
+  const anchor = useRef<string | null>(null);
+  const pickedRows = filtered.filter((row) => picked.has(row.id));
+  useEffect(() => { setPicked(new Set()); anchor.current = null; }, [retention]);
+  const togglePick = (id: string, range: boolean) => {
+    setPicked((current) => {
+      const next = new Set(current);
+      const from = range && anchor.current ? filtered.findIndex((row) => row.id === anchor.current) : -1;
+      const to = filtered.findIndex((row) => row.id === id);
+      if (from !== -1 && to !== -1) {
+        for (const row of filtered.slice(Math.min(from, to), Math.max(from, to) + 1)) next.add(row.id);
+      } else if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    anchor.current = id;
+  };
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const typing = event.target instanceof HTMLElement && event.target.closest("input, textarea, select, [contenteditable=true]");
+      if (event.key === "Escape" && picked.size && !bulk) setPicked(new Set());
+      if (!typing && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a" && filtered.length) {
+        event.preventDefault();
+        setPicked(new Set(filtered.map((row) => row.id)));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [picked.size, bulk, filtered]);
+  const runBulk = async (action: BulkAction) => {
+    let rows = pickedRows;
+    const count = (n: number) => `${n} recording${n === 1 ? "" : "s"}`;
+    if (action === "summarize") {
+      rows = rows.filter((row) => row.transcriptText?.trim() || row.hasTranscript);
+      if (!rows.length) { setError("None of the selected recordings has a transcript to summarize yet."); return; }
+    }
+    if (action === "transcribe") {
+      const done = rows.filter((row) => row.transcriptText?.trim() || row.hasTranscript).length;
+      if (done && !window.confirm(`${count(done)} already ${done === 1 ? "has" : "have"} a transcript and will be transcribed again. Continue?`)) return;
+    }
+    if (action === "trash" && !window.confirm(`Move ${count(rows.length)} to Trash? You can restore them from Trash for 30 days.`)) return;
+    if (action === "purge" && !window.confirm(`Permanently delete ${count(rows.length)} and their audio? This cannot be undone.`)) return;
+    const label = { transcribe: "Queueing", summarize: "Summarizing", star: "Starring", unstar: "Unstarring", trash: "Moving to Trash", restore: "Restoring", purge: "Deleting" }[action];
+    const failed: string[] = [];
+    setError("");
+    setBulk({ label, done: 0, total: rows.length });
+    // One at a time: summaries run on the local model, and the server queues transcriptions anyway.
+    for (const [index, row] of rows.entries()) {
+      try {
+        if (action === "transcribe") await api.transcribe(row.id);
+        else if (action === "summarize") await api.summarize(row.id);
+        else if (action === "star" || action === "unstar") {
+          const tags = action === "star" ? [...new Set([...row.tags, "Starred"])] : row.tags.filter((tag) => tag !== "Starred");
+          if (tags.length !== row.tags.length) await api.updateRecording(row.id, { tags, revision: row.revision });
+        } else if (action === "trash") await api.trashRecording(row.id);
+        else if (action === "restore") await api.restoreRecording(row.id);
+        else await api.purgeRecording(row.id);
+      } catch (e) {
+        failed.push(`${row.title}: ${(e as Error).message}`);
+      }
+      setBulk({ label, done: index + 1, total: rows.length });
+    }
+    setBulk(null);
+    if (["trash", "restore", "purge"].includes(action)) {
+      setPicked(new Set());
+      if (rows.some((row) => row.id === selected)) setSelected("");
+    }
+    if (action === "star" || action === "unstar") setTagRefresh((value) => value + 1);
+    await load();
+    if (failed.length) setError(`${failed.length} of ${rows.length} failed. ${failed.slice(0, 3).join(" · ")}${failed.length > 3 ? " …" : ""}`);
+  };
   const choose = (id: string) => {
     setSelected(id);
     if (window.matchMedia("(max-width: 1100px)").matches)
@@ -259,7 +333,18 @@ export function Dashboard() {
             </div>
             <PlaudImportDialog />
           </header>
-          {retention === "active" && (
+          {picked.size > 0 ? (
+            <BulkActions
+              count={pickedRows.length}
+              total={filtered.length}
+              trash={retention === "trash"}
+              allStarred={pickedRows.length > 0 && pickedRows.every((row) => row.tags.includes("Starred"))}
+              progress={bulk}
+              onRun={(action) => void runBulk(action)}
+              onSelectAll={() => setPicked(new Set(filtered.map((row) => row.id)))}
+              onClear={() => setPicked(new Set())}
+            />
+          ) : retention === "active" && (
             <BatchTranscribe recordings={recordings} onFinished={() => void load()} />
           )}
           <div className="studio-library-toolbar">
@@ -362,7 +447,7 @@ export function Dashboard() {
             </div>
           ) : (
             <div
-              className={`studio-recordings ${view === "grid" ? "studio-grid" : ""}`}
+              className={`studio-recordings ${view === "grid" ? "studio-grid" : ""} ${picked.size ? "picking" : ""}`}
             >
               <PlaudTransferRows transfers={transfers} />
               {filtered.map((row) => (
@@ -370,13 +455,22 @@ export function Dashboard() {
                 <ContextMenu.Trigger asChild disabled={retention === "trash"}>
                 <article
                   data-recording-id={row.id}
-                  onDoubleClick={event => { if (!(event.target as HTMLElement).closest(".studio-row-actions")) navigate(`/recording/${row.id}`); }}
-                  className={`studio-recording ${activeId === row.id && retention === "active" ? "selected" : ""}`}
+                  onDoubleClick={event => { if (!(event.target as HTMLElement).closest(".studio-row-actions, .studio-row-check")) navigate(`/recording/${row.id}`); }}
+                  className={`studio-recording ${activeId === row.id && retention === "active" ? "selected" : ""} ${picked.has(row.id) ? "picked" : ""}`}
                 >
+                  <label className="studio-row-check" title="Select (Shift for a range)" onClick={(event) => {
+                    event.preventDefault();
+                    togglePick(row.id, event.shiftKey);
+                  }}>
+                    <input type="checkbox" checked={picked.has(row.id)} readOnly aria-label={`Select ${row.title}`} />
+                  </label>
                   <button
                     id={`recording-open-${row.id}`}
                     className="studio-row-main"
-                    onClick={() => choose(row.id)}
+                    onClick={(event) => {
+                      if (event.metaKey || event.ctrlKey || event.shiftKey) togglePick(row.id, event.shiftKey);
+                      else choose(row.id);
+                    }}
                     aria-label={`Open ${row.title}`}
                     aria-pressed={activeId === row.id}
                   >

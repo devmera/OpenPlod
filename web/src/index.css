@@ -542,3 +542,9 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .approved-phones { display: grid; gap: 4px; margin-top: 18px; }
 .approved-phones h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--muted-foreground); }
 .approved-phone-icon { width: 18px; height: 18px; color: var(--success, #22c55e); }
+
+/* In-app confirmation (window.confirm does nothing in the desktop app). */
+.confirm-overlay { position: fixed; inset: 0; z-index: 90; background: rgb(0 0 0 / 0.5); }
+.confirm-dialog { position: fixed; z-index: 91; left: 50%; top: 50%; width: min(420px, calc(100vw - 32px)); transform: translate(-50%, -50%); display: grid; gap: 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); padding: 22px; box-shadow: 0 20px 50px rgb(0 0 0 / 0.35); }
+.confirm-message { margin: 0; font-size: 14px; font-weight: 500; line-height: 1.5; color: var(--foreground); }
+.confirm-buttons { display: flex; justify-content: flex-end; gap: 8px; }

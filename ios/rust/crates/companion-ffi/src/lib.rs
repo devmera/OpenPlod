@@ -134,13 +134,43 @@ pub async fn pull_new_recordings(
     std::fs::create_dir_all(&out_dir).context("creating the download folder")?;
     let mut link = Foreign { transport, timeout_ms: timeout_secs * 1000 };
     let (mut session, port) = open(&mut link, &key).await?;
-    let listed = driver::list(&mut link, &mut session, port).await?;
+    // Show the recorder's app icon while syncing, as Plaud's app does, but only when it clearly
+    // reports idle: SET_ACTIVE stops a recording in progress. Either step failing only costs the icon.
+    let active = signal_active(&mut link, &mut session).await;
+    let result = pull_listed(&mut link, &mut session, port, &key, &skip, &out_dir, &listener).await;
+    if active {
+        let normal = std::mem::replace(&mut link.timeout_ms, 3000);
+        let _ = driver::set_active(&mut link, &mut session, false).await;
+        link.timeout_ms = normal;
+    }
+    Ok(result?)
+}
+
+/// GetState, then SET_ACTIVE on only if idle; true when the flag was set (and must be cleared).
+async fn signal_active(link: &mut Foreign, session: &mut plaud_protocol::session::Session) -> bool {
+    let normal = std::mem::replace(&mut link.timeout_ms, 3000);
+    let set = matches!(driver::is_idle(link, session).await, Ok(true))
+        && driver::set_active(link, session, true).await.is_ok();
+    link.timeout_ms = normal;
+    set
+}
+
+async fn pull_listed(
+    link: &mut Foreign,
+    session: &mut plaud_protocol::session::Session,
+    port: u8,
+    key: &Key,
+    skip: &[u32],
+    out_dir: &str,
+    listener: &Arc<dyn PullListener>,
+) -> anyhow::Result<Vec<RecorderFile>> {
+    let listed = driver::list(link, session, port).await?;
     for recording in listed.iter().filter(|r| !skip.contains(&r.id)) {
         listener.on_progress(recording.id, "started".into(), None);
-        match driver::pull(&mut link, &mut session, recording, &key.private).await {
+        match driver::pull(link, session, recording, &key.private).await {
             Ok(audio) => {
                 let extension = if audio.starts_with(b"OggS") { "ogg" } else { "opus" };
-                let path = std::path::Path::new(&out_dir).join(format!("{}.{extension}", recording.id));
+                let path = std::path::Path::new(out_dir).join(format!("{}.{extension}", recording.id));
                 let partial = path.with_extension(format!("{extension}.part"));
                 std::fs::write(&partial, &audio).context("saving the recording")?;
                 std::fs::rename(&partial, &path).context("saving the recording")?;

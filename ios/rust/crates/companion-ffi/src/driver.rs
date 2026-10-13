@@ -11,6 +11,12 @@ use crate::link::Link;
 
 pub const OP_LOGIN: u16 = 0x01;
 pub const OP_LIST: u16 = 0x1A; // 26: GetRecSessions
+pub const OP_GET_STATE: u16 = 0x03;
+/// SET_ACTIVE (109): "a phone app is active" – the recorder shows its app icon and stays awake.
+/// Setting it while a recording runs STOPS that recording (firmware `[SET_ACTIVE REQ] stop recording`).
+pub const OP_SET_ACTIVE: u16 = 0x6D;
+/// GetState's status value that also means "recording" (SDK `s0.h`).
+const STATUS_RECORDING: u32 = 4099;
 pub const OP_READ: u16 = 0x1C; // 28: SyncFileStart
 pub const OP_TAIL: u16 = 0x1D; // 29: SyncFileStop (carries CRC-16)
 
@@ -214,6 +220,34 @@ pub async fn pull<L: Link>(
     file::decrypt(private_key, &raw).context("decrypting recording")
 }
 
+/// GetState (opcode 3). True only when the reply clearly says idle: state byte 0 (SDK `s0.g`:
+/// 0 idle, 1 record, 2 transfer, 3/4 switching on/off) and a status other than 4099 (recording).
+/// A short or unexpected reply counts as not idle.
+pub async fn is_idle<L: Link>(link: &mut L, session: &mut Session) -> Result<bool> {
+    link.write(&session.seal(&frame::control(OP_GET_STATE, &[]))).await?;
+    loop {
+        let plain = session.open(&link.next().await?)?;
+        let Frame::Control { opcode: OP_GET_STATE, payload } = frame::parse(&plain)? else { continue };
+        // The SDK reads status u32 @3 and state @8 of the frame, i.e. payload[0..4] and payload[5].
+        if payload.len() < 6 {
+            return Ok(false);
+        }
+        let status = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+        return Ok(status != STATUS_RECORDING && payload[5] == 0);
+    }
+}
+
+/// SET_ACTIVE (109): sends the flag and waits for the recorder's acknowledgement.
+pub async fn set_active<L: Link>(link: &mut L, session: &mut Session, active: bool) -> Result<()> {
+    link.write(&session.seal(&frame::control(OP_SET_ACTIVE, &[active as u8]))).await?;
+    loop {
+        let plain = session.open(&link.next().await?)?;
+        if let Frame::Control { opcode: OP_SET_ACTIVE, .. } = frame::parse(&plain)? {
+            return Ok(());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,6 +279,9 @@ mod tests {
         /// (recording, raw encrypted bytes, remaining allowed gaps to inject)
         file: Option<(Recording, Vec<u8>, u32)>,
         outbox: VecDeque<Vec<u8>>,
+        /// GetState reply: (status, state).
+        state: (u32, u8),
+        active: Vec<bool>,
     }
 
     impl FakeDevice {
@@ -258,6 +295,8 @@ mod tests {
                 logged_in: false,
                 file: None,
                 outbox: VecDeque::new(),
+                state: (0, 0),
+                active: Vec::new(),
             }
         }
 
@@ -368,6 +407,15 @@ mod tests {
                         }
                     }
                     // The real device stays silent until login.
+                    Frame::Control { opcode: OP_GET_STATE, .. } if self.logged_in => {
+                        let mut reply = self.state.0.to_le_bytes().to_vec();
+                        reply.extend_from_slice(&[0, self.state.1]);
+                        self.outbox.push_back(session.seal(&frame::control(OP_GET_STATE, &reply)));
+                    }
+                    Frame::Control { opcode: OP_SET_ACTIVE, payload } if self.logged_in => {
+                        self.active.push(payload.first() == Some(&1));
+                        self.outbox.push_back(session.seal(&frame::control(OP_SET_ACTIVE, &[0])));
+                    }
                     Frame::Control { opcode: OP_BATTERY, .. } if self.logged_in => {
                         let noise = session.seal(&frame::control(0x03, &[0]));
                         let reply = session.seal(&frame::control(OP_BATTERY, &[1, 87]));
@@ -503,5 +551,32 @@ mod tests {
         let err = handshake(&mut dev, &[0xAB; 256], test_key()).await.unwrap_err();
         assert!(err.to_string().contains("not linked"), "{err}");
         assert_eq!(dev.received_pem, None);
+    }
+
+    async fn logged_in(dev: &mut FakeDevice) -> Session {
+        let keys = handshake(dev, &[0xAB; 256], test_key()).await.unwrap();
+        let mut session = Session::phone(keys);
+        login(dev, &mut session, USER_ID).await.unwrap();
+        session
+    }
+
+    #[tokio::test]
+    async fn an_idle_recorder_gets_the_active_flag_on_and_off() {
+        let mut dev = FakeDevice::new(false);
+        let mut session = logged_in(&mut dev).await;
+        assert!(is_idle(&mut dev, &mut session).await.unwrap());
+        set_active(&mut dev, &mut session, true).await.unwrap();
+        set_active(&mut dev, &mut session, false).await.unwrap();
+        assert_eq!(dev.active, vec![true, false]);
+    }
+
+    #[tokio::test]
+    async fn a_recording_or_unclear_state_is_not_idle() {
+        for state in [(0, 1), (STATUS_RECORDING, 0), (0, 2), (0, 3)] {
+            let mut dev = FakeDevice::new(false);
+            dev.state = state;
+            let mut session = logged_in(&mut dev).await;
+            assert!(!is_idle(&mut dev, &mut session).await.unwrap(), "{state:?}");
+        }
     }
 }

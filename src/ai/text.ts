@@ -22,9 +22,20 @@ export async function installedOllamaModels(fetcher: Fetcher = fetch): Promise<s
   return payload.models.filter(item => !item.remote_model && !item.remote_host && !/cloud/i.test(item.name)).map(item => item.name);
 }
 
+/**
+ * Ollama's default context is a few thousand tokens and it silently drops the start of a longer
+ * prompt, so size it to the request: about three characters per token plus the reply, rounded up to
+ * a power of two between 8k and 32k tokens. Longer input is refused upstream (100 KB analysis limit).
+ */
+export function ollamaContext(messages: TextMessage[], maxTokens: number): number {
+  const needed = Math.ceil(messages.reduce((total, message) => total + message.content.length, 0) / 3) + maxTokens + 512;
+  return Math.min(32768, Math.max(8192, 2 ** Math.ceil(Math.log2(needed))));
+}
+
 export async function completeText(selection: TextSelection, messages: TextMessage[], options: { signal?: AbortSignal; timeoutMs?: number; maxTokens?: number; json?: boolean } = {}, fetcher: Fetcher = fetch): Promise<TextResult> {
   const { provider, model, apiKey } = selection;
-  const signal = AbortSignal.any([AbortSignal.timeout(options.timeoutMs ?? 90000), ...(options.signal ? [options.signal] : [])]);
+  // Local models read and write far slower than hosted ones; a long meeting can take minutes.
+  const signal = AbortSignal.any([AbortSignal.timeout(options.timeoutMs ?? (provider === 'ollama' ? 600000 : 90000)), ...(options.signal ? [options.signal] : [])]);
   signal.throwIfAborted();
   if (provider !== 'ollama' && !apiKey) throw new Error(`The ${provider} API key is not configured.`);
   const maxTokens = options.maxTokens ?? 8192;
@@ -33,7 +44,7 @@ export async function completeText(selection: TextSelection, messages: TextMessa
   if (provider === 'ollama') {
     if (!(await installedOllamaModels(fetcher)).includes(model)) throw new Error('The selected local Ollama model is not installed.');
     url = 'http://127.0.0.1:11434/api/chat';
-    body = { model, messages, stream: false, options: { temperature: 0.2, num_predict: maxTokens }, ...(options.json ? { format: 'json' } : {}) };
+    body = { model, messages, stream: false, options: { temperature: 0.2, num_predict: maxTokens, num_ctx: ollamaContext(messages, maxTokens) }, ...(options.json ? { format: 'json' } : {}) };
   } else if (provider === 'anthropic') {
     url = 'https://api.anthropic.com/v1/messages';
     headers['x-api-key'] = apiKey!; headers['anthropic-version'] = '2023-06-01';

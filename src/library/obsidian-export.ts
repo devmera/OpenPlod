@@ -11,6 +11,7 @@
  * deleted is not recreated automatically.
  */
 import type { Database } from 'bun:sqlite';
+import { presentSummary } from './plaud-summary';
 import { createHash } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -174,7 +175,7 @@ export class ObsidianExporter {
         recordedAt: String(row.recordedAt ?? row.uploadedAt), durationSeconds: row.duration === null ? null : Number(row.duration),
         sourceProvider: row.sourceProvider === null ? null : String(row.sourceProvider), recordingType: String(row.recordingType),
         segments: json<Segment[]>(row.segments, []), fullText: String(row.fullText ?? ''),
-        summary: json(row.summary, null), tasks: json(row.tasks, []),
+        summary: presentSummary(this.sqlite, String(row.id), row.recordedAt === null ? null : String(row.recordedAt), json(row.summary, null)), tasks: json(row.tasks, []),
       },
     };
   }

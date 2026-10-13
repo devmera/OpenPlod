@@ -39,6 +39,7 @@ import {
 import { forwardRecording } from '../library/forwarding';
 import { queueRecordingProcessing } from '../library/processing';
 import { playbackFile } from '../library/playback-copy';
+import { presentSummary } from '../library/plaud-summary';
 
 const app = new Hono();
 let bookmarkStore: RecordingBookmarks | undefined;
@@ -715,7 +716,7 @@ app.get('/:id', async (c) => {
           wordCount: transcript.wordCount,
           speakerCount: transcript.speakerCount,
           confidenceScore: transcript.confidenceScore,
-          summary: transcript.summary,
+          summary: presentSummary(sqlite, id, recording.recordedAt, transcript.summary),
           extractedTasks: transcript.extractedTasks,
           analyzedAt: transcript.analyzedAt,
         } : null,

@@ -529,8 +529,9 @@ function mapRecording(r: RawRecording): Recording {
     transcriptOrigin: transcript?.origin,
     transcriptVersionId: transcript?.currentVersionId,
     summary: transcript?.summary ? (typeof transcript.summary === 'string' ? transcript.summary : transcript.summary.overview) : undefined,
-    summaryKeyPoints: typeof transcript?.summary === 'object' ? transcript.summary.keyPoints?.filter(Boolean) : undefined,
-    summaryTopics: typeof transcript?.summary === 'object' ? transcript.summary.topics?.filter(Boolean) : undefined,
+    // `typeof null` is 'object': a recording without a summary yet has `summary: null`.
+    summaryKeyPoints: transcript?.summary && typeof transcript.summary === 'object' ? transcript.summary.keyPoints?.filter(Boolean) : undefined,
+    summaryTopics: transcript?.summary && typeof transcript.summary === 'object' ? transcript.summary.topics?.filter(Boolean) : undefined,
     actionItems: transcript?.extractedTasks
       ?.map(item => typeof item === 'string' ? item : item.title)
       .filter((item): item is string => Boolean(item)),

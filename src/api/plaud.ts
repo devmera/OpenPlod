@@ -26,7 +26,7 @@ import {
 } from '../sync/plaud-cloud';
 import {
   DEFAULT_PLAUD_DOMAIN, PLAUD_DOMAINS, PlaudIdentityProvisioner, clearPendingIdentity, clearStoredIdentity, deviceTypeForSerial,
-  identityFilePath, isPlaudDomain, parseDeviceIdentity, provisionWithDeveloperCredentials, readPendingIdentity, readStoredIdentity,
+  generateLocalKeyPair, identityFilePath, isPlaudDomain, knownSerialCredentials, parseDeviceIdentity, provisionWithDeveloperCredentials, readPendingIdentity, readStoredIdentity,
   replaceStoredIdentity, writePendingIdentity, writeStoredIdentity, type KeySource, type ProvisionedIdentity,
 } from '../sync/plaud-provision';
 
@@ -423,9 +423,13 @@ app.post('/identity', async c => {
     // Retrying an interrupted local bind must offer the same key: the recorder may already hold it.
     const pending = keySource === 'local' ? await readPendingIdentity() : null;
     const localKeys = pending?.serial === serial ? { publicKey: pending.publicKey, privateKey: pending.privateKey } : undefined;
-    const identity: ProvisionedIdentity = body.token?.trim()
-      ? await new PlaudIdentityProvisioner().provision({ token: body.token, serial, identifier, domain, keySource, localKeys })
-      : await provisionWithDeveloperCredentials({ serial, identifier, domain, keySource, localKeys });
+    // A local key needs only the serial signature, which never changes; reuse one this computer holds.
+    const known = keySource === 'local' && !body.token?.trim() ? await knownSerialCredentials(serial) : null;
+    const identity: ProvisionedIdentity = known
+      ? { identifier, serial, ...known, ...(localKeys ?? generateLocalKeyPair()), keySource, deviceType: deviceTypeForSerial(serial) }
+      : body.token?.trim()
+        ? await new PlaudIdentityProvisioner().provision({ token: body.token, serial, identifier, domain, keySource, localKeys })
+        : await provisionWithDeveloperCredentials({ serial, identifier, domain, keySource, localKeys });
     if (keySource === 'plaud') {
       await writeStoredIdentity(identity);
     } else {

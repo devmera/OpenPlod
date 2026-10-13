@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   BINDING_TOKEN_PATTERN, PlaudIdentityProvisioner, clearPendingIdentity, clearStoredIdentity, deviceTypeForSerial,
-  generateLocalKeyPair, identityFilePath, normalizeAccessToken, parseAccessToken, parseDeviceIdentity,
+  generateLocalKeyPair, identityFilePath, knownSerialCredentials, normalizeAccessToken, parseAccessToken, parseDeviceIdentity,
   pendingIdentityFilePath, previousIdentityFilePath, provisionWithDeveloperCredentials, readPendingIdentity,
   readStoredIdentity, replaceStoredIdentity, writePendingIdentity, writeStoredIdentity,
 } from './plaud-provision';
@@ -261,6 +261,18 @@ describe('locally generated keys', () => {
     await writeStoredIdentity(identityFor(generateLocalKeyPair(), 'plaud'));
     await clearStoredIdentity();
     expect(JSON.parse(await readFile(previousIdentityFilePath(), 'utf8')).privateKey).toBe(second.privateKey);
+  });
+
+  test('reuses the serial signature this computer already holds for that serial only', async () => {
+    await withTemporaryIdentity();
+    expect(await knownSerialCredentials(SERIAL)).toBeNull();
+    await writeStoredIdentity(identityFor(generateLocalKeyPair(), 'plaud'));
+    expect(await knownSerialCredentials(SERIAL)).toEqual({ signature, bindingToken: BINDING_TOKEN });
+    expect(await knownSerialCredentials('8810000000000000')).toBeNull();
+    await clearStoredIdentity(); // a Plaud key is deleted, so nothing is left to reuse
+    expect(await knownSerialCredentials(SERIAL)).toBeNull();
+    await writePendingIdentity({ ...identityFor(generateLocalKeyPair()), deviceType: 'notepro' });
+    expect(await knownSerialCredentials(SERIAL)).toEqual({ signature, bindingToken: BINDING_TOKEN });
   });
 
   test('keeps a pending key private until the bind is confirmed', async () => {

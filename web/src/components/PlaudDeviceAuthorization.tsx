@@ -125,6 +125,7 @@ export function PlaudDeviceAuthorization({ status, onAuthorized, variant = 'page
         <select value={domain} aria-label="Plaud region" onChange={event => setDomain(event.target.value)}>{domains.map(value => <option key={value} value={value}>{value}</option>)}</select>
       </label>
       {identity?.developerCredentialsAvailable && <p>Plaud developer credentials are configured on this computer, so the token may be left empty.</p>}
+      {keySource === 'local' && <p>If this computer has authorized this recorder before, leave the token empty: its serial signature is reused and Plaud is not contacted.</p>}
       <div className="plaud-authorize-actions">
         <Button disabled={busy || waitingForDevice} onClick={() => void authorize()}>{busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />}Authorize this computer</Button>
       </div>

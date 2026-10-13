@@ -286,6 +286,24 @@ export async function replaceStoredIdentity(identity: PlaudDeviceIdentity): Prom
   return { previousKept };
 }
 
+/**
+ * The serial signature and binding token of an identity this computer already
+ * holds for `serial` (active, pending or replaced). Plaud's signature covers only
+ * the serial, so a new local key can reuse it without asking Plaud again.
+ */
+export async function knownSerialCredentials(serial: string): Promise<{ signature: string; bindingToken: string } | null> {
+  for (const path of [identityFilePath(), pendingIdentityFilePath(), previousIdentityFilePath()]) {
+    try {
+      const identity = JSON.parse(await readFile(path, 'utf8')) as Partial<PlaudDeviceIdentity>;
+      if (identity.serial === serial && typeof identity.signature === 'string' && identity.signature
+        && typeof identity.bindingToken === 'string' && BINDING_TOKEN_PATTERN.test(identity.bindingToken)) {
+        return { signature: identity.signature, bindingToken: identity.bindingToken };
+      }
+    } catch { /* absent or unreadable: try the next one */ }
+  }
+  return null;
+}
+
 export async function readPendingIdentity(): Promise<ProvisionedIdentity | null> {
   try { return JSON.parse(await readFile(pendingIdentityFilePath(), 'utf8')) as ProvisionedIdentity; }
   catch { return null; }

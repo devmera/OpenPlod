@@ -1,0 +1,15 @@
+# Rust core of the OpenPlod iOS companion: the Plaud protocol and Bluetooth driver, exposed to
+# Swift through UniFFI. Derived from unplaud (MIT) without its cloud setup, pairing or reset paths.
+[workspace]
+resolver = "2"
+members = ["crates/plaud-protocol", "crates/companion-ffi"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

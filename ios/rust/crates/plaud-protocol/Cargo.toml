@@ -1,0 +1,16 @@
+[package]
+name = "plaud-protocol"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Transport-agnostic Plaud Note Pro protocol: framing, handshake, session crypto, file format (from unplaud, MIT)"
+
+[dependencies]
+chacha20 = "0.9"
+chacha20poly1305 = "0.10"
+rsa = "0.9"
+thiserror = "2"
+
+[dev-dependencies]
+hex = "0.4"
+rand = "0.8"

@@ -93,7 +93,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
   const summaryView = useRef<HTMLDivElement>(null)
   // Open on the summary when there is one, unless a link asked for a time or a version.
   const openedFor = useRef<string | null>(null)
-  const processing = useProcessing(recording)
+  const processing = useProcessing(recording, () => void loadRecording())
   const [editingMetadata, setEditingMetadata] = useState(false)
   const [activeSegment, setActiveSegment] = useState<string | null>(null)
   // TS-01: the scroll anchor is held separately from the highlight so a pause
@@ -291,8 +291,9 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
     setAction(nextAction)
     setError('')
     try {
+        // Queued in the background: the page shows progress and reloads when it is done.
         await api.summarize(id)
-        await loadRecording()
+        await loadRecording(false)
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : 'Action failed')
     } finally {
@@ -519,7 +520,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
                   <div className="summary-regenerate"><Button variant="ghost" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <RotateCcw />}Summarize again</Button></div>
                 </div>
               ) : (
-                processing ? <ProcessingState processing={processing} /> : <div className="inspector-empty summary-empty"><p>No summary yet.</p><Button variant="outline" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null || !recording.transcriptText}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <AlignLeft />}Generate summary</Button></div>
+                processing ? <ProcessingState processing={processing} /> : <div className="inspector-empty summary-empty"><p>{recording.errorMessage?.startsWith('Summary failed') ? recording.errorMessage : 'No summary yet.'}</p><Button variant="outline" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null || !recording.transcriptText}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <AlignLeft />}Generate summary</Button></div>
               )
             ) : documentMode === 'studio' ? (
               <TranscriptStudio recording={recording} onChanged={loadRecording} />

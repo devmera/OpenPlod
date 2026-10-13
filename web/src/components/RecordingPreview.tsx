@@ -93,7 +93,16 @@ export function RecordingPreview({
   // A transcript or summary finishing elsewhere shows up here without reopening the recording.
   const [libraryVersion, setLibraryVersion] = useState(0);
   useLibraryChanges(() => setLibraryVersion(value => value + 1));
-  const processing = useProcessing(recording);
+  const [reload, setReload] = useState(0);
+  const processing = useProcessing(recording, () => setReload((value) => value + 1));
+  const summarize = async () => {
+    try {
+      await api.summarize(id);
+      setReload((value) => value + 1);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
   useEffect(() => {
     let disposed = false;
     api
@@ -111,7 +120,7 @@ export function RecordingPreview({
     return () => {
       disposed = true;
     };
-  }, [id, metadataRefresh, libraryVersion]);
+  }, [id, metadataRefresh, libraryVersion, reload]);
   useEffect(() => {
     if (!container.current) return;
     let disposed = false,
@@ -571,12 +580,10 @@ export function RecordingPreview({
             ) : (
               <div className="preview-empty">
                 <AlignLeft />
-                <p>No saved summary yet.</p>
+                <p>{recording?.errorMessage?.startsWith("Summary failed") ? recording.errorMessage : "No saved summary yet."}</p>
                 <Button
                   disabled={!recording?.transcriptText}
-                  onClick={() =>
-                    ask("Summarize this recording with source citations.")
-                  }
+                  onClick={() => void summarize()}
                 >
                   <AlignLeft />Summarize recording
                 </Button>

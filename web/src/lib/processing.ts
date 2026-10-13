@@ -1,29 +1,42 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Recording } from './api'
 import { aiSettingsApi, type ProcessingJob } from './ai-settings'
 
 /** Where a recording is in processing, or null when nothing is running or queued for it. */
-export type Processing = { stage: 'queued' | 'transcribing' | 'summarizing'; ahead: number }
+export type Processing = { stage: 'queued' | 'queued-summary' | 'transcribing' | 'summarizing'; ahead: number }
 
-/** Reads the job queue so "queued" is shown only when a job for this recording really waits. */
-export function useProcessing(recording: Pick<Recording, 'id' | 'status'> | null): Processing | null {
+/**
+ * Reads the job queue while the recording is busy, so "queued" is shown only when a job for it
+ * really waits. `onSettled` runs once its job has left the queue, so the page can reload the result.
+ */
+export function useProcessing(recording: Pick<Recording, 'id' | 'status'> | null, onSettled?: () => void): Processing | null {
   const [jobs, setJobs] = useState<ProcessingJob[] | null>(null)
+  const settled = useRef(onSettled)
+  useEffect(() => { settled.current = onSettled }, [onSettled])
   const busy = recording && ['pending', 'transcribing', 'summarizing'].includes(recording.status)
+  const recordingId = recording?.id
   useEffect(() => {
-    if (!busy) return
-    let active = true
-    const load = () => aiSettingsApi.jobs().then(rows => { if (active) setJobs(rows) }).catch(() => { if (active) setJobs([]) })
+    if (!busy || !recordingId) return
+    let active = true, seen = false
+    const load = () => aiSettingsApi.jobs().then(rows => {
+      if (!active) return
+      setJobs(rows)
+      const open = rows.some(job => job.recordingId === recordingId && (job.status === 'pending' || job.status === 'running'))
+      if (open) seen = true
+      else if (seen) { seen = false; settled.current?.() }
+    }).catch(() => { if (active) setJobs([]) })
     void load()
     // The queue moves as other recordings finish; refresh the position while waiting.
-    const timer = window.setInterval(() => void load(), 5000)
+    const timer = window.setInterval(() => void load(), 3000)
     return () => { active = false; window.clearInterval(timer) }
-  }, [busy, recording?.id, recording?.status])
+  }, [busy, recordingId, recording?.status])
   if (!recording || !busy) return null
-  if (recording.status === 'transcribing') return { stage: 'transcribing', ahead: 0 }
-  if (recording.status === 'summarizing') return { stage: 'summarizing', ahead: 0 }
   const open = (jobs ?? []).filter(job => job.status === 'pending' || job.status === 'running')
   const index = open.findIndex(job => job.recordingId === recording.id)
-  return index === -1 ? null : { stage: 'queued', ahead: index }
+  if (recording.status === 'transcribing') return { stage: 'transcribing', ahead: 0 }
+  if (recording.status === 'summarizing' || open[index]?.status === 'running' && open[index]?.type === 'summarize-recording') return { stage: 'summarizing', ahead: 0 }
+  if (index === -1) return null
+  return { stage: open[index].type === 'summarize-recording' ? 'queued-summary' : 'queued', ahead: index }
 }
 
 /** Processing stage per recording for the library list; one queue read for all rows. */

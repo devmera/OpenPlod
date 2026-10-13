@@ -1352,3 +1352,27 @@
     transform: none;
   }
 }
+
+/* Plaud recordings still moving from the recorder: a thin progress line along the row's bottom edge. */
+.plaud-transfer-row {
+  position: relative;
+  color: var(--muted-foreground);
+}
+.plaud-transfer-row.failed .studio-source-icon,
+.plaud-transfer-row.failed .studio-row-tags span {
+  color: var(--destructive);
+}
+.plaud-transfer-progress {
+  position: absolute;
+  inset: auto 0 -1px 0;
+  height: 2px;
+  background: var(--border);
+}
+.plaud-transfer-progress > div {
+  height: 100%;
+  background: var(--primary);
+  transition: width 0.4s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .plaud-transfer-progress > div { transition: none; }
+}

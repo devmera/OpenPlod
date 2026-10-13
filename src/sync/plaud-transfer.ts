@@ -112,7 +112,7 @@ export async function listPlaudSessions(connection: PlaudPackets, protocol = 20)
 }
 
 export async function downloadPlaudSession(connection: PlaudPackets, session: PlaudSessionEntry,
-  options: { prefix?: Uint8Array; checkpoint?: (bytes: Buffer) => Promise<void> } = {}) {
+  options: { prefix?: Uint8Array; checkpoint?: (bytes: Buffer) => Promise<void>; progress?: (received: number) => void } = {}) {
   const download = new PlaudDownload(session, options.prefix);
   await connection.write(buildDownloadRequest({ sessionId: session.sessionId, offset: options.prefix?.length ?? 0, end: session.size }));
   const deadline = Date.now() + 15 * 60000;
@@ -120,6 +120,7 @@ export async function downloadPlaudSession(connection: PlaudPackets, session: Pl
   try {
   while (Date.now() < deadline) {
     const result = download.add(await connection.packet(Math.min(15000, deadline - Date.now())));
+    options.progress?.(download.downloaded.length);
     if (download.downloaded.length - checkpointed >= 65536) { await options.checkpoint?.(download.downloaded); checkpointed = download.downloaded.length; }
     if (result) return result;
   }

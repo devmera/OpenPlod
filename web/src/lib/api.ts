@@ -357,6 +357,16 @@ export interface DeviceRecording {
 }
 
 /** Background sync state: the listener, the last round, and any problem. */
+/** A recording moving from the Plaud right now. */
+export interface PlaudTransfer {
+  sessionId: number
+  recordedAt: string
+  size: number
+  received: number
+  phase: 'queued' | 'downloading' | 'decoding' | 'saving' | 'failed'
+  error?: string
+}
+
 export interface PlaudSyncStatus {
   enabled: boolean
   running: boolean
@@ -721,6 +731,8 @@ export const api = {
   },
   getPlaudSyncStatus: async (signal?: AbortSignal): Promise<PlaudSyncStatus> =>
     (await fetchJSON<ApiEnvelope<PlaudSyncStatus>>('/plaud/auto-import', { signal: signal ?? AbortSignal.timeout(5000) })).data,
+  getPlaudTransfers: async (signal?: AbortSignal): Promise<PlaudTransfer[]> =>
+    (await fetchJSON<ApiEnvelope<PlaudTransfer[]>>('/plaud/transfers', { signal: signal ?? AbortSignal.timeout(5000) })).data,
   syncPlaudNow: async (): Promise<PlaudSyncStatus> =>
     (await fetchJSON<ApiEnvelope<PlaudSyncStatus>>('/plaud/auto-import/sync', { method: 'POST' })).data,
   /** The recorder's list from the last background sync; null before the first round. No Bluetooth. */

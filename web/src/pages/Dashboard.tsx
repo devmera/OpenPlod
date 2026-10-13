@@ -40,6 +40,8 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { PlaudImportDialog } from "@/components/PlaudImportDialog";
 import { RecordingPreview } from "@/components/RecordingPreview";
+import { PlaudTransferRows } from "@/components/PlaudTransferRows";
+import { usePlaudTransfers } from "@/lib/plaud-transfers";
 import { WorkspaceTiles } from "@/components/WorkspaceTiles";
 import { RecordingTagsDialog } from "@/components/RecordingTagsDialog";
 import { Button } from "@/components/ui/button";
@@ -115,6 +117,9 @@ export function Dashboard() {
       window.removeEventListener("plaud:sync-complete", load);
     };
   }, [load, invalidate]);
+  // Plaud recordings still transferring show as rows above the library, in the views they will land in.
+  const allTransfers = usePlaudTransfers(() => void load());
+  const transfers = retention === "active" && !starred && ["all", "plaud"].includes(source) ? allTransfers : [];
   const search = useDeferredValue(query.toLocaleLowerCase());
   const filtered = useMemo(
     () =>
@@ -318,7 +323,7 @@ export function Dashboard() {
             <div className="preview-empty">
               <Loader2 className="animate-spin" />
             </div>
-          ) : !filtered.length && !error ? (
+          ) : !filtered.length && !transfers.length && !error ? (
             <div className="studio-empty">
               <FileAudio />
               <h2>
@@ -343,6 +348,7 @@ export function Dashboard() {
             <div
               className={`studio-recordings ${view === "grid" ? "studio-grid" : ""}`}
             >
+              <PlaudTransferRows transfers={transfers} />
               {filtered.map((row) => (
                 <ContextMenu.Root key={row.id}>
                 <ContextMenu.Trigger asChild disabled={retention === "trash"}>

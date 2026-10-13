@@ -8,7 +8,7 @@ import { downloadPlaudSession, listPlaudSessions, recordingHandshake, unlinkReco
 import { fingerprintFile, importRecordingFile } from '../library/recording-library';
 import { openPlaudCheckpoint } from './plaud-checkpoint';
 import { bluetoothSupported, isBluetoothIdentifier, isDesktopPlatform } from './plaud-bridge';
-import { BINDING_TOKEN_PATTERN, PLAUD_SERIAL_PATTERN, identityFilePath } from './plaud-provision';
+import { BINDING_TOKEN_PATTERN, PLAUD_SERIAL_PATTERN, identityFilePath, previousPrivateKeys } from './plaud-provision';
 
 interface DeviceIdentity extends PlaudIdentity { identifier: string; serial: string; bindingToken: string }
 const vaultRoot = () => dirname(resolve(process.env.OPENPLOD_LIBRARY_PATH || './data/recordings'));
@@ -134,6 +134,19 @@ async function runAudioTool(command: string[]) {
   } finally { clearTimeout(timer); }
 }
 
+/**
+ * Unwraps a recording's file key with the current user key, then with keys this
+ * computer used before for the same recorder (recordings keep the key they were
+ * made under).
+ */
+export async function unwrapFileKey(ciphertext: Buffer, keys: string[], decrypt: (key: string) => Promise<{ data?: string }>): Promise<Buffer> {
+  for (const key of keys) {
+    try { return Buffer.from((await decrypt(key)).data ?? '', 'base64'); }
+    catch (error) { if (!/rsa-decrypt/i.test(error instanceof Error ? error.message : String(error))) throw error; }
+  }
+  throw new Error('This recording was made while the recorder was bound to a key this computer does not hold, so it cannot be decrypted here.');
+}
+
 export async function importDirectPlaudRecording(sessionId: number) {
   if (!Number.isSafeInteger(sessionId) || sessionId < 0 || sessionId > 0xffffffff) throw new Error('Invalid Plaud session ID');
   return withDevice(async (connection, identity, signal) => {
@@ -148,10 +161,9 @@ export async function importDirectPlaudRecording(sessionId: number) {
     const checkpoint = await openPlaudCheckpoint(resumePath, prefix.length);
     const downloaded = await downloadPlaudSession(connection, selected, { prefix, checkpoint: bytes => checkpoint.save(bytes) })
       .finally(() => checkpoint.close());
-    const decoded = await decodePlaudAudio(downloaded.bytes, async ciphertext => {
-      const reply = await connection.transport.request('rsa-decrypt', { key: identity.privateKey, data: ciphertext.toString('base64') });
-      return Buffer.from(reply.data ?? '', 'base64');
-    });
+    const keys = [identity.privateKey, ...await previousPrivateKeys(identity.serial)];
+    const decoded = await decodePlaudAudio(downloaded.bytes, ciphertext => unwrapFileKey(ciphertext, keys,
+      key => connection.transport.request('rsa-decrypt', { key, data: ciphertext.toString('base64') })));
     const retained = await listPlaudSessions(connection);
     if (!retained.some(session => session.sessionId === selected.sessionId && session.size === selected.size)) throw new Error('Source retention could not be confirmed');
     await mkdir(join(vaultRoot(), 'incoming'), { recursive: true, mode: 0o700 });

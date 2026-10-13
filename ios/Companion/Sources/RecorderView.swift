@@ -9,6 +9,7 @@ struct RecorderView: View {
     @State private var destination = Destination.load()
     @State private var editingDestination = false
     @ObservedObject private var engine = SyncEngine.shared
+    @ObservedObject private var activity = Activity.shared
 
     var body: some View {
         NavigationStack {
@@ -54,6 +55,16 @@ struct RecorderView: View {
                             ForEach(recordings, id: \.sessionId) { file in
                                 LabeledContent(Date(timeIntervalSince1970: TimeInterval(file.sessionId)).formatted(date: .abbreviated, time: .shortened),
                                                value: ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file))
+                            }
+                        }
+                    }
+                    if !activity.entries.isEmpty {
+                        Section("Activity") {
+                            ForEach(activity.entries.prefix(12)) { entry in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.text).font(.subheadline)
+                                    Text(entry.at.formatted(date: .omitted, time: .standard)).font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }

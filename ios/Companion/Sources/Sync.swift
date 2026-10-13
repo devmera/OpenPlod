@@ -27,19 +27,25 @@ final class SyncEngine: ObservableObject {
 
     /// The linked recorder was heard advertising: sync if set up and not done very recently.
     func recorderHeard() {
-        guard !running, let key = KeyStore.load(), let destination = Destination.load(),
-              lastAttempt.map({ Date().timeIntervalSince($0) > cooldown }) ?? true else { return }
         let background = UIApplication.shared.applicationState != .active
+        guard !running, let key = KeyStore.load(), let destination = Destination.load() else { return }
+        if let lastAttempt, Date().timeIntervalSince(lastAttempt) < cooldown { return }
+        Activity.shared.record("Recorder heard\(background ? " in the background" : ""); syncing")
         let task = UIApplication.shared.beginBackgroundTask(withName: "Sync recordings")
         Task {
             let uploaded = await sync(key: key, destination: destination)
+            Activity.shared.record(summary ?? "Sync finished")
             if background && uploaded > 0 { notify(uploaded) }
             UIApplication.shared.endBackgroundTask(task)
         }
     }
 
+    /// Asks once; later calls do nothing once the user has answered.
     static func requestNotifications() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .notDetermined else { return }
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
     }
 
     private func notify(_ count: Int) {

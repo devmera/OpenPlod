@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Check, CheckCircle2, CloudUpload, Download, FileAudio, FileText, Link2, Loader2, RefreshCw, Sparkles, Trash2, X } from '@/components/icons'
+import { Check, CheckCircle2, CloudUpload, Download, FileAudio, FileText, KeyRound, Link2, Loader2, RefreshCw, Sparkles, Trash2, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/icon-button'
 import { api, type PlaudCloudImportJob, type PlaudCloudStatus } from '@/lib/api'
+import { plaudSignInSupported, signInToPlaud } from '@/lib/plaud-sign-in'
 import './plaud-cloud-import.css'
 
 const bytes = (value: number) => value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : value >= 1024 ? `${Math.round(value / 1024)} KB` : `${value} B`
@@ -74,16 +75,29 @@ export function PlaudCloudImport() {
     }, 1000)
   }, [load])
 
-  const link = async () => {
+  const link = async (value = token) => {
     setBusy(true); setError(''); setNotice('')
     try {
-      const result = await api.linkPlaudCloud(token.trim())
+      const result = await api.linkPlaudCloud(value.trim())
       setToken('')
       setNotice(`Linked. Found ${result.count} recordings (${bytes(result.bytes)}) in the ${result.region || 'Plaud'} cloud.`)
       await load()
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not link that token.')
     } finally { setBusy(false) }
+  }
+
+  // Sign in, then link straight away: no device is needed to read the cloud library.
+  const signIn = async () => {
+    setError(''); setNotice('')
+    try {
+      const { workspaceToken, userToken } = await signInToPlaud()
+      const value = workspaceToken ?? userToken
+      if (!value) throw new Error('Signed in, but Plaud did not provide a token. Paste it manually instead.')
+      await link(value)
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure))
+    }
   }
 
   const unlink = async () => {
@@ -137,11 +151,15 @@ export function PlaudCloudImport() {
 
     {!linked ? <>
       <p className="device-muted">Get every recording off your Plaud account over the internet — no Bluetooth, no recorder authorization. Audio, transcripts and AI summaries come along.</p>
+      {plaudSignInSupported() && <div className="plaud-cloud-actions">
+        <Button disabled={busy} onClick={() => void signIn()}>{busy ? <Loader2 className="animate-spin" /> : <KeyRound />}Sign in to Plaud</Button>
+        <span className="device-muted">or paste a token below</span>
+      </div>}
       <label className="plaud-cloud-field"><span>Plaud sign-in token</span>
         <input type="password" autoComplete="off" spellCheck={false} value={token} placeholder="Paste workspaceToken (or tokenstr) from web.plaud.ai" aria-label="Plaud sign-in token" onChange={event => setToken(event.target.value)} />
       </label>
       <div className="plaud-cloud-actions">
-        <Button disabled={busy || !token.trim()} onClick={() => void link()}>{busy ? <Loader2 className="animate-spin" /> : <Link2 />}Link account &amp; list recordings</Button>
+        <Button variant={plaudSignInSupported() ? 'outline' : 'default'} disabled={busy || !token.trim()} onClick={() => void link()}>{busy ? <Loader2 className="animate-spin" /> : <Link2 />}Link account &amp; list recordings</Button>
       </div>
       <details className="plaud-cloud-help"><summary>Where do I find this token?</summary>
         <p>Sign in at <a href="https://web.plaud.ai" target="_blank" rel="noreferrer">web.plaud.ai</a>, open your browser's developer tools, go to <em>Application → Local Storage → https://web.plaud.ai</em>, and copy the value of <code>workspaceToken</code> (inside the <code>…:workspaceList</code> entry). Some versions call the key <code>tokenstr</code> instead.</p>

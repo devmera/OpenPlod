@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ChangeEvent } from 'react'
 import { Check, KeyRound, Loader2, ShieldCheck, Trash2, Unplug } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { api, type PlaudIdentityStatus, type PlaudKeySource, type PlaudStatus } from '@/lib/api'
+import { plaudSignInSupported, signInToPlaud } from '@/lib/plaud-sign-in'
 import './plaud-device-authorization.css'
 
 /**
@@ -84,6 +85,18 @@ export function PlaudDeviceAuthorization({ status, onAuthorized, variant = 'page
     } finally { setBusy(false) }
   }
 
+  const signIn = async () => {
+    setBusy(true); setError(''); setNotice('')
+    try {
+      const { userToken } = await signInToPlaud()
+      if (!userToken) throw new Error('Signed in, but Plaud did not provide a sign-in token. Paste it manually instead.')
+      setToken(userToken)
+      setNotice('Signed in to Plaud. Wake the Note Pro, then authorize this computer.')
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure))
+    } finally { setBusy(false) }
+  }
+
   const forget = async () => {
     if (identity?.keySource === 'local' && !window.confirm('The recorder stays bound to this key, and the Plaud app cannot unlink it. The key will be moved to plaud-device.previous.json, not deleted. Continue?')) return
     setBusy(true); setError(''); setNotice('')
@@ -142,6 +155,9 @@ export function PlaudDeviceAuthorization({ status, onAuthorized, variant = 'page
           <span><strong>Generate a key on this computer</strong><small>For an unlinked recorder: unlink it in the Plaud app first (keep recordings), then wake it. Plaud only signs the serial number and never sees this key; the Plaud app cannot connect while it is in use.</small></span></label>
       </fieldset>
       {identity?.bindPending && keySource === 'local' && <p className="plaud-authorize-notice">The recorder was offered a key from this computer but the bind was not confirmed. Wake it and authorize again to finish with the same key.</p>}
+      {plaudSignInSupported() && <div className="plaud-authorize-actions">
+        <Button variant="outline" size="sm" disabled={busy} onClick={() => void signIn()}><KeyRound />Sign in to Plaud</Button>
+      </div>}
       <label className="plaud-authorize-field"><span>Plaud sign-in token</span>
         <input type="password" autoComplete="off" spellCheck={false} value={token} placeholder="Paste tokenstr from web.plaud.ai" aria-label="Plaud sign-in token" onChange={event => setToken(event.target.value)} />
       </label>

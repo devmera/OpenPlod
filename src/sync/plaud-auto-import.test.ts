@@ -43,3 +43,27 @@ test('a recording made under another key is skipped once, without blocking newer
     expect(attempts).toEqual([1, 2]); // neither downloaded again
   } finally { db.close(); }
 });
+
+test('the verdict survives a restart and is revisited when the held keys change', async () => {
+  const db = new Database(':memory:');
+  try {
+    db.exec('CREATE TABLE user_settings(key TEXT PRIMARY KEY,value TEXT); CREATE TABLE recordings(id TEXT,source_provider TEXT,source_recording_id TEXT)');
+    const attempts: number[] = [];
+    let keys = 'old-keys';
+    const adapter = {
+      configured: () => true, keys: () => keys,
+      list: async () => ({ serial: 'device', checkedAt: new Date().toISOString(), sessions: [{ sessionId: 1, size: 1000, scene: 0, timezone: 0 }] }),
+      import: async (sessionId: number): Promise<never> => { attempts.push(sessionId); throw new Error('This recording was made while the recorder was bound to a key this computer does not hold, so it cannot be decrypted here.'); },
+    };
+    const first = new PlaudAutoImport(db, adapter);
+    first.set(true); await first.tick(); await first.tick();
+    expect(attempts).toEqual([1]);
+    const restarted = new PlaudAutoImport(db, adapter);
+    await restarted.tick(); await restarted.tick();
+    expect(attempts).toEqual([1]);
+    expect(restarted.status()).toMatchObject({ skipped: 1 });
+    keys = 'imported-another-key';
+    await restarted.tick();
+    expect(attempts).toEqual([1, 1]);
+  } finally { db.close(); }
+});

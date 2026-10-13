@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { chmod, copyFile, mkdir, mkdtemp, open, readFile, stat, unlink, writeFile, rmdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { PlaudConnection, type PlaudIdentity } from './plaud-connection';
@@ -8,7 +9,7 @@ import { downloadPlaudSession, listPlaudSessions, recordingHandshake } from './p
 import { fingerprintFile, importRecordingFile } from '../library/recording-library';
 import { openPlaudCheckpoint } from './plaud-checkpoint';
 import { bluetoothSupported, isBluetoothIdentifier, isDesktopPlatform } from './plaud-bridge';
-import { BINDING_TOKEN_PATTERN, PLAUD_SERIAL_PATTERN, identityFilePath, previousPrivateKeys } from './plaud-provision';
+import { BINDING_TOKEN_PATTERN, PLAUD_SERIAL_PATTERN, identityFilePath, previousIdentityFilePath, previousPrivateKeys } from './plaud-provision';
 
 interface DeviceIdentity extends PlaudIdentity { identifier: string; serial: string; bindingToken: string }
 const vaultRoot = () => dirname(resolve(process.env.OPENPLOD_LIBRARY_PATH || './data/recordings'));
@@ -135,6 +136,13 @@ export async function unwrapFileKey(ciphertext: Buffer, keys: string[], decrypt:
     catch (error) { if (!/rsa-decrypt/i.test(error instanceof Error ? error.message : String(error))) throw error; }
   }
   throw new Error('This recording was made while the recorder was bound to a key this computer does not hold, so it cannot be decrypted here.');
+}
+
+/** Changes whenever the set of recorder keys held here changes, so "cannot decrypt" verdicts can be revisited. */
+export function heldKeysSignature(): string {
+  const hash = createHash('sha256');
+  for (const path of [identityFilePath(), previousIdentityFilePath()]) hash.update(existsSync(path) ? readFileSync(path) : '-');
+  return hash.digest('hex').slice(0, 16);
 }
 
 export async function importDirectPlaudRecording(sessionId: number) {

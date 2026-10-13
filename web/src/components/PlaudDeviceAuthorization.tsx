@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { api, type PlaudIdentityStatus, type PlaudKeySource, type PlaudStatus } from '@/lib/api'
 import { plaudSignInSupported, signInToPlaud } from '@/lib/plaud-sign-in'
 import './plaud-device-authorization.css'
+import { confirmAction } from '@/lib/confirm'
 
 /**
  * Authorizes this computer to read recordings off the paired recorder.
@@ -98,7 +99,7 @@ export function PlaudDeviceAuthorization({ status, onAuthorized, variant = 'page
   }
 
   const forget = async () => {
-    if (identity?.keySource === 'local' && !window.confirm('The recorder stays bound to this key, and the Plaud app cannot unlink it. The key will be moved to plaud-device.previous.json, not deleted. Continue?')) return
+    if (identity?.keySource === 'local' && !(await confirmAction('The recorder stays bound to this key, and the Plaud app cannot unlink it. The key will be moved to plaud-device.previous.json, not deleted. Continue?', { confirmLabel: 'Continue', destructive: true }))) return
     setBusy(true); setError(''); setNotice('')
     try {
       await api.clearPlaudIdentity()

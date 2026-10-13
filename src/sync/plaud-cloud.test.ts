@@ -221,6 +221,20 @@ describe('PlaudCloudClient', () => {
     expect(new Uint8Array(readFileSync(destination))).toEqual(payload);
   });
 
+  test('reports the served size and rejects a download cut short', async () => {
+    const payload = new Uint8Array([1, 2, 3, 4]);
+    const served = (length: string) => (async (input: RequestInfo | URL) => {
+      if (String(input).startsWith('https://bucket.example/')) return new Response(payload, { headers: { 'content-length': length } });
+      return json({ status: 0, temp_url: 'https://bucket.example/audio.mp3' });
+    }) as unknown as typeof fetch;
+    const totals: number[] = [];
+    await new PlaudCloudClient({ token: ACCOUNT, fetcher: served('4') }).download('a', join(root, 'whole.mp3'), (_, total) => totals.push(total));
+    expect(totals.at(-1)).toBe(4);
+    const destination = join(root, 'short.mp3');
+    await expect(new PlaudCloudClient({ token: ACCOUNT, fetcher: served('9') }).download('a', destination)).rejects.toMatchObject({ code: 'download_failed' });
+    expect(await Bun.file(destination).exists()).toBe(false);
+  });
+
   test('leaves no partial file behind when a download fails', async () => {
     const fetcher = (async (input: RequestInfo | URL) => {
       if (String(input).startsWith('https://bucket.example/')) return new Response('nope', { status: 500 });

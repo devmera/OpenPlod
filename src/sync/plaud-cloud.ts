@@ -314,8 +314,8 @@ export class PlaudCloudClient {
   }
 
   /**
-   * Streams one recording to `destination`. Returns the byte count so callers
-   * can compare it with the size the account reported.
+   * Streams one recording to `destination` and returns the byte count. Progress
+   * reports the served size as `total` (0 when the server does not say).
    */
   async download(
     id: string,
@@ -342,6 +342,10 @@ export class PlaudCloudClient {
       }
       sink.end();
       await once(sink, 'finish');
+      // The served file is checked against the size its server announced. The account listing's
+      // `filesize` is not comparable: for device recordings it is the original Opus file, while the
+      // download is an MP3 several times larger.
+      if (total > 0 && received !== total) throw new PlaudCloudError('The download stopped before it finished. Try again.', 'download_failed');
     } catch (error) {
       sink.destroy();
       rmSync(destination, { force: true });

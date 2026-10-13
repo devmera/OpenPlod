@@ -329,15 +329,14 @@ async function runCloudImport(params: {
     job.current = recording.filename;
     const title = cloudTitle(recording);
     const stagePath = resolve(staging, `${crypto.randomUUID()}-${safeFilename(title)}`);
-    let streamed = 0;
+    let streamed = 0, sized = false;
     try {
-      const bytes = await client.download(recording.id, stagePath, received => {
+      await client.download(recording.id, stagePath, (received, served) => {
+        // The listing's size estimates the job total; the real size replaces it once the download starts.
+        if (!sized && served > 0) { job.totalBytes += served - recording.sizeBytes; sized = true; }
         job.receivedBytes += received - streamed;
         streamed = received;
       });
-      if (recording.sizeBytes > 0 && bytes !== recording.sizeBytes) {
-        throw new Error(`Plaud reported ${recording.sizeBytes} bytes but sent ${bytes}. The recording was not imported.`);
-      }
       const result = await importRecordingFile({
         sourcePath: stagePath,
         originalFilename: title,

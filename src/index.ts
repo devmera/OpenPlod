@@ -78,7 +78,7 @@ jobQueue.register('process-recording', async (data: any, job) => {
     { primary, fallback: config.transcriptionFallback, localOnly: currentConfig.privacyMode === 'local-only' || config.privacyMode === 'local-only', beforeAttempt: provider => assertPrivacy(readAiConfig(sqlite), provider) },
     { mistralApiKey: settings.mistralApiKey, deepgramApiKey: settings.deepgramApiKey, openaiApiKey: settings.openaiApiKey, assemblyaiApiKey: settings.assemblyaiApiKey },
   );
-  const options = { model: config.transcriptionModel || undefined, language: config.transcriptionLanguage, diarize: config.transcriptionDiarize, vocabulary: config.transcriptionVocabulary };
+  const options = { model: config.transcriptionModel || undefined, language: config.transcriptionLanguage, diarize: config.transcriptionDiarize, vocabulary: config.transcriptionVocabulary, channelSpeakers: recording.sourceProvider === 'meeting' };
   const startedAt = new Date().toISOString();
   const result = await router.transcribeFile(filePath, { ...options, signal: job.signal, checkpoint: job.checkpoint, onCheckpoint: job.saveCheckpoint });
   job.signal.throwIfAborted();

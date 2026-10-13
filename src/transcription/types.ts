@@ -43,6 +43,8 @@ export interface TranscriptionOptions {
   language?: string;
   /** Model to use (engine-specific) */
   model?: string;
+  /** Stereo meeting capture: left channel is this Mac's microphone, right channel the other participants. */
+  channelSpeakers?: boolean;
   /** Number of threads for local processing */
   threads?: number;
   vocabulary?: string[];

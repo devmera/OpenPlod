@@ -182,6 +182,7 @@ export function RecordingPreview({
   const canDownloadAudio = !!recording && (!!audioUrl.current || getRuntime().mode !== 'browser');
   const seek = (seconds: number) =>
     wave.current?.setTime(Math.max(0, Math.min(duration, seconds)));
+  const playFrom = (seconds: number) => { seek(seconds); void wave.current?.play(); };
   const ask = (prompt: string) =>
     navigate(`/ai?${new URLSearchParams({ recording: id, question: prompt })}`);
   const saveNotes = async () => {
@@ -471,7 +472,7 @@ export function RecordingPreview({
                 >
                   <button
                     className="preview-timestamp"
-                    onClick={() => seek(segment.startTime)}
+                    onClick={() => playFrom(segment.startTime)}
                   >
                     {formatDuration(segment.startTime)}
                   </button>
@@ -484,7 +485,9 @@ export function RecordingPreview({
                       />
                       {segment.speaker}
                     </strong>
-                    <p>{segment.text}</p>
+                    <button type="button" className="preview-segment-text" disabled={!ready} onClick={() => playFrom(segment.startTime)} title={`Play from ${formatDuration(segment.startTime)}`}>
+                      {segment.text}
+                    </button>
                     <div className="segment-quick-actions">
                       <button
                         aria-label={`Copy segment ${index + 1}`}

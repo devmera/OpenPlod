@@ -348,6 +348,7 @@ export function Dashboard() {
                 <ContextMenu.Trigger asChild disabled={retention === "trash"}>
                 <article
                   data-recording-id={row.id}
+                  onDoubleClick={event => { if (!(event.target as HTMLElement).closest(".studio-row-actions")) navigate(`/recording/${row.id}`); }}
                   className={`studio-recording ${activeId === row.id && retention === "active" ? "selected" : ""}`}
                 >
                   <button

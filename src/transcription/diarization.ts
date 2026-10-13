@@ -36,22 +36,48 @@ if torch.backends.mps.is_available():
 out = pipeline({"waveform": torch.from_numpy(samples).unsqueeze(0), "sample_rate": rate})
 annotation = getattr(out, "exclusive_speaker_diarization", None) or getattr(out, "speaker_diarization", out)
 turns = [{"start": t.start, "end": t.end, "speaker": s} for t, _, s in annotation.itertracks(yield_label=True)]
+# One voiceprint per speaker, in the order of the diarization's labels; speakers with too little speech have none.
+embeddings = {}
+vectors = getattr(out, "speaker_embeddings", None)
+if vectors is not None:
+    for label, vector in zip(out.speaker_diarization.labels(), vectors):
+        if np.all(np.isfinite(vector)):
+            embeddings[label] = [round(float(x), 6) for x in vector]
 with open(sys.argv[2], "w") as f:
-    json.dump(turns, f)
+    json.dump({"turns": turns, "embeddings": embeddings}, f)
 `;
-const turnsSchema = z.array(z.object({ start: z.number(), end: z.number(), speaker: z.string() }));
+const outputSchema = z.object({
+  turns: z.array(z.object({ start: z.number(), end: z.number(), speaker: z.string() })),
+  embeddings: z.record(z.string(), z.array(z.number())),
+});
+
+export interface Diarization {
+  turns: SpeakerTurn[];
+  /** Voiceprint per numbered speaker, for recognising the same person in other recordings. */
+  embeddings: Record<number, number[]>;
+}
 
 /** Speaker turns for a 16 kHz mono WAV. Speakers are numbered from `first` in order of first appearance. */
-export async function diarize(wav: string, directory: string, signal: AbortSignal, first = 0): Promise<SpeakerTurn[]> {
+export async function diarize(wav: string, directory: string, signal: AbortSignal, first = 0): Promise<Diarization> {
   const path = join(directory, 'diarize.py'), output = join(directory, 'turns.json');
   await writeFile(path, script, { mode: 0o600 });
   await run(diarizationPython(), [path, wav, output], { signal, timeout: 1800000, maxBuffer: 16 * 1024 * 1024 });
-  const raw = turnsSchema.parse(JSON.parse(await readFile(output, 'utf8')));
+  const raw = outputSchema.parse(JSON.parse(await readFile(output, 'utf8')));
   const ids = new Map<string, number>();
-  return raw.sort((a, b) => a.start - b.start).map(turn => {
+  const turns = raw.turns.sort((a, b) => a.start - b.start).map(turn => {
     if (!ids.has(turn.speaker)) ids.set(turn.speaker, first + ids.size);
     return { start: turn.start, end: turn.end, speaker: ids.get(turn.speaker)! };
   });
+  const embeddings: Record<number, number[]> = {};
+  for (const [label, vector] of Object.entries(raw.embeddings)) if (ids.has(label)) embeddings[ids.get(label)!] = vector;
+  return { turns, embeddings };
+}
+
+/** The speaker with the most speech, e.g. the person at a microphone that also picks up a little of the room. */
+export function dominantSpeaker(turns: SpeakerTurn[]): number | undefined {
+  const totals = new Map<number, number>();
+  for (const turn of turns) totals.set(turn.speaker, (totals.get(turn.speaker) ?? 0) + turn.end - turn.start);
+  return [...totals].sort((a, b) => b[1] - a[1])[0]?.[0];
 }
 
 /** The turn overlapping the span most, or the nearest one when none overlaps. */

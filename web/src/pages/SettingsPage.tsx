@@ -9,6 +9,7 @@ import { getRuntime } from '@/lib/runtime'
 import { buildInfo, buildLabel } from '@/lib/build-info'
 import { AiSettingsPanel } from '@/components/AiSettingsPanel'
 import { MeetingRecorderPanel } from '@/components/MeetingRecorderPanel'
+import { SpeakersPanel } from '@/components/SpeakersPanel'
 
 function Toggle({ checked, onChange, label, description }: { checked: boolean; onChange: (v: boolean) => void; label: string; description: string }) {
   return (
@@ -126,6 +127,8 @@ export function SettingsPage() {
       <AiSettingsPanel />
 
       <div id="meetings" ref={meetingsSection}><MeetingRecorderPanel /></div>
+
+      <SpeakersPanel />
 
       {/* Sync */}
       <Card>

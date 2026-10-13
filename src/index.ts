@@ -27,8 +27,10 @@ import mobileApi from './api/mobile';
 import transcriptsApi from './api/transcripts';
 import { configuredSyncPath, purgeExpiredTrash } from './library/recording-library';
 import { saveGeneratedTranscript } from './library/transcript-history';
+import { SpeakerIdentity } from './library/speaker-identity';
 import { forwardRecordingWithRetry } from './library/forwarding';
 import { createAiSettingsApi } from './api/ai-settings';
+import { createSpeakersApi } from './api/speakers';
 import { createJobsApi } from './api/jobs';
 import { createMeetingsApi } from './api/meetings';
 import { MeetingRecorder, finalizeMeeting, meetingStagingDirectory, spawnMeetingBridge } from './meetings/meeting-recorder';
@@ -84,10 +86,14 @@ jobQueue.register('process-recording', async (data: any, job) => {
   job.signal.throwIfAborted();
 
   if (result.success) {
+    // Name speakers already known from earlier recordings; their voiceprints are kept once this transcript is current.
+    const speakers = new SpeakerIdentity(sqlite);
+    const identified = speakers.identify(result.segments, (result.metadata?.speakerEmbeddings ?? {}) as Record<number, number[]>,
+      typeof result.metadata?.selfSpeaker === 'number' ? result.metadata.selfSpeaker : undefined);
     const documentUpdated = saveGeneratedTranscript({
       recordingId,
       fullText: result.fullText,
-      segments: result.segments,
+      segments: identified.segments,
       wordCount: result.wordCount,
       speakerCount: result.speakerCount,
       confidence: result.confidence,
@@ -95,6 +101,8 @@ jobQueue.register('process-recording', async (data: any, job) => {
       generationId: job.id,
       provenance: { provider: result.engine, model: result.metadata?.model ?? null, fingerprint: data.fingerprint, options, startedAt, completedAt: new Date().toISOString(), usage: result.metadata?.usage ?? null, language: result.metadata?.language ?? null },
     });
+
+    if (documentUpdated) speakers.store(recordingId, identified.rows);
 
     if (documentUpdated && settings.autoSummarize === 'true') {
       await db.update(recordings).set({ status: 'summarizing' }).where(eq(recordings.id, recordingId));
@@ -172,6 +180,7 @@ app.route('/api/ai', createRecordingAiApi(new RecordingAi(organizer)));
 app.route('/api/ai-settings', createAiSettingsApi(sqlite));
 const meetings = new MeetingRecorder({ database: sqlite, spawnBridge: spawnMeetingBridge, finalize: finalizeMeeting, stagingDirectory: meetingStagingDirectory });
 app.route('/api/meetings', createMeetingsApi(meetings));
+app.route('/api/speakers', createSpeakersApi(sqlite));
 
 // Settings
 app.get('/api/settings', async (c) => {

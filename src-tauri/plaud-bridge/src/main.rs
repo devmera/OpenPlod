@@ -117,18 +117,38 @@ fn normalize_identifier(value: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn is_plaud(properties: &PeripheralProperties) -> bool {
+/// How strongly a peripheral looks like a recorder: 2 when it carries the Note Pro
+/// advertisement (serial in the manufacturer data) or the command service, 1 when
+/// only its name matches, 0 otherwise.  A Note Pro also advertises an Apple Find
+/// My identity whose name can match but which has no command service.
+fn plaud_rank(properties: &PeripheralProperties) -> u8 {
+    let framed: Vec<Value> = properties
+        .manufacturer_data
+        .iter()
+        .map(|(company, bytes)| {
+            let mut data = company.to_le_bytes().to_vec();
+            data.extend_from_slice(bytes);
+            json!({ "data": BASE64.encode(data) })
+        })
+        .collect();
+    if parse_note_pro_advertisement(&framed).0.is_some() || properties.services.contains(&SERVICE_UUID) {
+        return 2;
+    }
     let named = properties
         .local_name
         .as_deref()
         .map(|name| name.to_ascii_lowercase().contains(NAME_HINT))
         .unwrap_or(false);
-    let advertised = properties.services.contains(&SERVICE_UUID);
-    named || advertised
+    u8::from(named)
 }
 
+/// How long a saved identifier gets to appear before a look-alike is accepted.
+const EXACT_GRACE: Duration = Duration::from_secs(5);
+
 /// Find a recorder, preferring an exact address match but falling back to the
-/// first recorder-like peripheral so identities stay portable across platforms.
+/// strongest recorder-like peripheral so identities stay portable across
+/// platforms.  The fallback waits `EXACT_GRACE` for the saved identifier first,
+/// and a name-only match is used only when nothing better appeared by the timeout.
 async fn find_peripheral(
     adapter: &Adapter,
     identifier: &str,
@@ -139,8 +159,9 @@ async fn find_peripheral(
         .await
         .map_err(|error| format!("Bluetooth scan could not start: {error}"))?;
     let target = normalize_identifier(identifier);
-    let deadline = Instant::now() + timeout;
-    let mut fallback: Option<Peripheral> = None;
+    let started = Instant::now();
+    let deadline = started + timeout;
+    let mut fallback: Option<(u8, Peripheral)> = None;
     let mut exact: Option<Peripheral> = None;
     'outer: loop {
         if Instant::now() >= deadline {
@@ -158,20 +179,20 @@ async fn find_peripheral(
                 exact = Some(peripheral);
                 break 'outer;
             }
-            if fallback.is_none() {
-                if let Some(properties) = peripheral.properties().await.ok().flatten() {
-                    if is_plaud(&properties) {
-                        fallback = Some(peripheral);
-                    }
+            if let Some(properties) = peripheral.properties().await.ok().flatten() {
+                let rank = plaud_rank(&properties);
+                if rank > fallback.as_ref().map_or(0, |(best, _)| *best) {
+                    fallback = Some((rank, peripheral));
                 }
             }
         }
-        if fallback.is_some() {
+        let waited = target.is_empty() || started.elapsed() >= EXACT_GRACE;
+        if waited && matches!(fallback, Some((2, _))) {
             break;
         }
     }
     let _ = adapter.stop_scan().await;
-    Ok(exact.or(fallback))
+    Ok(exact.or(fallback.map(|(_, peripheral)| peripheral)))
 }
 
 /// The Bluetooth backend `btleplug` binds to on this target.  Reported so the

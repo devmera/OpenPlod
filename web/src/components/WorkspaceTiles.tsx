@@ -75,7 +75,7 @@ export function WorkspaceTiles() {
           <Smartphone />
         </span>
         <div>
-          <strong>Android</strong>
+          <strong>Phone</strong>
           <p>Pair your phone</p>
         </div>
         <ChevronRight className="tile-arrow" />

@@ -534,3 +534,6 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .device-desktop > svg { width: 36px; height: 36px; margin-bottom: 16px; color: var(--primary); }
 .device-desktop p { color: var(--muted-foreground); margin-block: 12px 24px; max-width: 48ch; }
 @media (max-width: 640px) { .device-page { padding: 20px 16px; } .device-recording-row button { min-width: 44px; min-height: 44px; } }
+
+/* The code a phone shows while requesting the recorder key; compared on both screens. */
+.phone-approval-code { border: 1px solid var(--border); border-radius: 6px; background: var(--secondary); padding: 6px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 18px; font-weight: 600; letter-spacing: 0.18em; }

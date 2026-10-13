@@ -12,3 +12,6 @@
 .android-page :is(a,summary):focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; }
 @media (max-width: 1000px) { .android-pairing { padding-right: 20px; }.android-details { padding-left: 20px; } }
 @media (max-width: 767px) { .android-page { padding: 0 12px 24px; }.android-heading { min-height: 60px; }.android-heading h1 { font-size: 22px; }.android-workspace { grid-template-columns: minmax(0,1fr); }.android-pairing { border-right: 0; border-bottom: 1px solid var(--border); padding: 24px 8px; }.android-details { padding: 0 8px; } }
+
+/* Phone key requests shown beside the pairing QR. */
+.android-pairing .device-section { margin-top: 18px; }

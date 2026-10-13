@@ -15,6 +15,15 @@
 .plaud-authorize-field > span { display: block; margin-bottom: 5px; font-size: 11px; color: var(--muted-foreground); }
 .plaud-authorize-field input, .plaud-authorize-field select { width: 100%; min-width: 0; padding: 8px 10px; font-size: 12px; color: inherit; background: var(--background); border: 1px solid var(--border); border-radius: 6px; }
 .plaud-authorize-field input:focus-visible, .plaud-authorize-field select:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.plaud-authorize-keys { display: grid; gap: 8px; margin: 0 0 12px; padding: 0; border: 0; }
+.plaud-authorize-keys legend { margin-bottom: 5px; font-size: 11px; color: var(--muted-foreground); }
+.plaud-authorize-keys label { display: flex; align-items: flex-start; gap: 9px; padding: 9px 10px; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+.plaud-authorize-keys label:has(input:checked) { border-color: var(--primary); }
+.plaud-authorize-keys input { margin-top: 2px; accent-color: var(--primary); }
+.plaud-authorize-keys input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.plaud-authorize-keys span { display: grid; gap: 2px; min-width: 0; }
+.plaud-authorize-keys small { font-size: 11px; line-height: 1.5; color: var(--muted-foreground); }
+.plaud-authorize-import input { max-width: 100%; margin-top: 8px; font-size: 11px; }
 .plaud-authorize-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .plaud-authorize-notice { color: var(--positive); }
 .plaud-authorize-error { color: var(--destructive); }

@@ -290,10 +290,16 @@ export interface PlaudIdentityStatus {
   serial: string | null
   identifier: string | null
   deviceType: string | null
+  /** `local`: the key was generated on this computer and exists nowhere else. */
+  keySource: PlaudKeySource | null
+  /** A local key was offered to the recorder but the bind was not confirmed yet. */
+  bindPending: boolean
   developerCredentialsAvailable: boolean
   domains: string[]
   identityPath: string
 }
+
+export type PlaudKeySource = 'plaud' | 'local'
 
 /** One recording listed from the Plaud cloud account. */
 export interface PlaudCloudRecordingSummary {
@@ -744,10 +750,18 @@ export const api = {
   },
 
   // Authorizing may trigger a Bluetooth scan to discover the serial and address.
-  authorizePlaudDevice: async (input: { token?: string; domain?: string; serial?: string; identifier?: string }, signal?: AbortSignal): Promise<{ authorized: boolean; serial: string; identifier: string; deviceType: string }> => {
-    const res = await fetchJSON<ApiEnvelope<{ authorized: boolean; serial: string; identifier: string; deviceType: string }>>('/plaud/identity', {
+  authorizePlaudDevice: async (input: { token?: string; domain?: string; serial?: string; identifier?: string; keySource?: PlaudKeySource }, signal?: AbortSignal): Promise<{ authorized: boolean; serial: string; identifier: string; deviceType: string; keySource: PlaudKeySource }> => {
+    // A local key is bound over Bluetooth before it is saved, which can take a few connection attempts.
+    const timeout = input.keySource === 'local' ? 180000 : 90000
+    const res = await fetchJSON<ApiEnvelope<{ authorized: boolean; serial: string; identifier: string; deviceType: string; keySource: PlaudKeySource }>>('/plaud/identity', {
       method: 'POST', body: JSON.stringify(input),
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(90000)]) : AbortSignal.timeout(90000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout),
+    })
+    return res.data
+  },
+  importPlaudIdentity: async (identity: unknown): Promise<{ authorized: boolean; serial: string; deviceType: string; keySource: PlaudKeySource; previousKept: boolean }> => {
+    const res = await fetchJSON<ApiEnvelope<{ authorized: boolean; serial: string; deviceType: string; keySource: PlaudKeySource; previousKept: boolean }>>('/plaud/identity/import', {
+      method: 'POST', body: JSON.stringify({ identity }), signal: AbortSignal.timeout(20000),
     })
     return res.data
   },

@@ -1,5 +1,6 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { PlaudDeviceAuth, readDeviceCredentials } from './plaud-device-auth';
 import { isBluetoothIdentifier } from './plaud-bridge';
@@ -15,6 +16,13 @@ import { isBluetoothIdentifier } from './plaud-bridge';
  *  3. the account's device binding token (the `sub` claim of the user token).
  *
  * All three are minted by the Plaud Partner API from a **user access token**.
+ *
+ * The key pair can instead be generated on this computer (`keySource: 'local'`).
+ * A recorder with no user key asks the client for one during the normal
+ * handshake (`0xFE11`) and stores it, so an unlinked recorder binds to a key
+ * that never leaves this machine; Plaud only signs the serial. A recorder that
+ * is still linked to another key keeps it: unlinking stays an owner action in the
+ * Plaud app, and OpenPlod never sends force-clear.
  * That endpoint is the same one the official Plaud SDK uses
  * (`PlaudDeviceAgent.initSDK(userAccessToken:)`), which is why authorizing here
  * makes the recorder work identically on Linux, macOS and Windows.
@@ -41,6 +49,9 @@ export interface PlaudAccessTokenClaims {
   expiresAt: number;
 }
 
+/** Where the identity's key pair came from: Plaud's `gen-key`, or generated on this computer. */
+export type KeySource = 'plaud' | 'local';
+
 /** The on-disk `plaud-device.json` shape the native bridge consumes. */
 export interface PlaudDeviceIdentity {
   identifier: string;
@@ -49,10 +60,49 @@ export interface PlaudDeviceIdentity {
   signature: string;
   publicKey: string;
   privateKey: string;
+  /** Absent in identities written before local keys existed (those came from Plaud). */
+  keySource?: KeySource;
 }
 
 export interface ProvisionedIdentity extends PlaudDeviceIdentity {
   deviceType: string;
+}
+
+/**
+ * A fresh RSA-2048 user key in the shapes the recorder and bridge expect: the
+ * public key travels to the recorder as PEM text (as the Plaud SDK sends it) and
+ * the private key is base64 PKCS#8 DER for the bridge's PKCS#1 v1.5 unwrap.
+ */
+export function generateLocalKeyPair(): { publicKey: string; privateKey: string } {
+  const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048, publicExponent: 0x10001 });
+  return {
+    publicKey: publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+    privateKey: privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64'),
+  };
+}
+
+/** Validates an identity from outside this app (an import) before it is trusted. */
+export function parseDeviceIdentity(value: unknown): PlaudDeviceIdentity {
+  const input = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const text = (key: string) => typeof input[key] === 'string' ? (input[key] as string).trim() : '';
+  const identity: PlaudDeviceIdentity = {
+    identifier: text('identifier'), serial: text('serial').toUpperCase(), bindingToken: text('bindingToken'),
+    signature: text('signature'), publicKey: text('publicKey'), privateKey: text('privateKey'),
+    keySource: input.keySource === 'plaud' ? 'plaud' : 'local',
+  };
+  if (!isBluetoothIdentifier(identity.identifier)) throw new Error('The identity has no valid Bluetooth address.');
+  if (!PLAUD_SERIAL_PATTERN.test(identity.serial)) throw new Error('The identity has no valid recorder serial number.');
+  if (!BINDING_TOKEN_PATTERN.test(identity.bindingToken)) throw new Error('The identity has no valid binding token.');
+  const base64 = /^[A-Za-z0-9+/]+={0,2}$/;
+  if (!base64.test(identity.signature) || Buffer.from(identity.signature, 'base64').length !== 256) {
+    throw new Error('The identity signature must be a base64 RSA-2048 signature.');
+  }
+  if (!/^-----BEGIN PUBLIC KEY-----[\s\S]+-----END PUBLIC KEY-----$/.test(identity.publicKey)) {
+    throw new Error('The identity public key must be PEM text.');
+  }
+  if (!base64.test(identity.privateKey)) throw new Error('The identity private key must be base64 DER.');
+  identity.publicKey += '\n';
+  return identity;
 }
 
 type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
@@ -168,23 +218,37 @@ export class PlaudIdentityProvisioner {
     return signature;
   }
 
-  /** Provision a complete identity for one recorder. */
-  async provision(options: { token: string; serial: string; identifier: string; domain?: PlaudDomain }): Promise<ProvisionedIdentity> {
+  /**
+   * Provision a complete identity for one recorder. With `keySource: 'local'` the
+   * key pair is generated here (or `localKeys` is reused for a retried bind) and
+   * only the serial signature is requested from Plaud.
+   */
+  async provision(options: {
+    token: string; serial: string; identifier: string; domain?: PlaudDomain;
+    keySource?: KeySource; localKeys?: { publicKey: string; privateKey: string };
+  }): Promise<ProvisionedIdentity> {
     const { token, serial, identifier } = options;
+    const keySource = options.keySource ?? 'plaud';
     const domain = options.domain ?? DEFAULT_PLAUD_DOMAIN;
     if (!PLAUD_SERIAL_PATTERN.test(serial)) throw new Error('A 16-character Plaud serial number is required.');
     if (!isBluetoothIdentifier(identifier)) throw new Error('A Bluetooth address for the recorder is required.');
     const claims = parseAccessToken(token);
     const deviceType = deviceTypeForSerial(serial);
-    const { publicKey, privateKey } = await this.generateKeyPair(token, domain);
+    const { publicKey, privateKey } = keySource === 'local'
+      ? options.localKeys ?? generateLocalKeyPair()
+      : await this.generateKeyPair(token, domain);
     const signature = await this.signSerial(token, serial, domain, deviceType);
-    return { identifier, serial, bindingToken: claims.sub, publicKey, privateKey, signature, deviceType };
+    return { identifier, serial, bindingToken: claims.sub, publicKey, privateKey, signature, deviceType, keySource };
   }
 }
 
 /** Directory that holds `plaud-device.json` (for example `~/.local/share/com.openplod.vault`). */
 export const identityDirectory = () => dirname(resolve(process.env.OPENPLOD_LIBRARY_PATH || './data/recordings'));
 export const identityFilePath = () => process.env.OPENPLOD_DEVICE_IDENTITY || join(identityDirectory(), 'plaud-device.json');
+/** A locally generated identity between "the recorder may have stored its key" and "binding confirmed". */
+export const pendingIdentityFilePath = () => identityFilePath().replace(/\.json$/, '') + '.pending.json';
+/** The identity a newer one replaced, kept so a mistaken replacement can be undone by hand. */
+export const previousIdentityFilePath = () => identityFilePath().replace(/\.json$/, '') + '.previous.json';
 
 
 /** Read the saved identity without throwing when it is absent or unreadable. */
@@ -197,19 +261,70 @@ export async function readStoredIdentity(): Promise<PlaudDeviceIdentity | null> 
   }
 }
 
-/** Persist an identity with owner-only permissions (the loader enforces this). */
-export async function writeStoredIdentity(identity: PlaudDeviceIdentity): Promise<void> {
-  const path = identityFilePath();
+async function writePrivateJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   // Create with 0o600 up front so the key material is never briefly world-readable.
-  await writeFile(path, `${JSON.stringify(identity, null, 2)}\n`, { mode: 0o600 });
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   if (process.platform !== 'win32') await chmod(path, 0o600);
 }
 
+/** Persist an identity with owner-only permissions (the loader enforces this). */
+export async function writeStoredIdentity(identity: PlaudDeviceIdentity): Promise<void> {
+  await writePrivateJson(identityFilePath(), identity);
+}
+
+/**
+ * Makes `identity` the active one. A different identity already in place is
+ * moved aside first: a locally generated private key exists nowhere else, so it
+ * is never silently overwritten.
+ */
+export async function replaceStoredIdentity(identity: PlaudDeviceIdentity): Promise<{ previousKept: boolean }> {
+  const current = await readStoredIdentity();
+  const previousKept = Boolean(current && current.privateKey !== identity.privateKey);
+  if (previousKept) await rename(identityFilePath(), previousIdentityFilePath());
+  await writeStoredIdentity(identity);
+  return { previousKept };
+}
+
+/**
+ * The serial signature and binding token of an identity this computer already
+ * holds for `serial` (active, pending or replaced). Plaud's signature covers only
+ * the serial, so a new local key can reuse it without asking Plaud again.
+ */
+export async function knownSerialCredentials(serial: string): Promise<{ signature: string; bindingToken: string } | null> {
+  for (const path of [identityFilePath(), pendingIdentityFilePath(), previousIdentityFilePath()]) {
+    try {
+      const identity = JSON.parse(await readFile(path, 'utf8')) as Partial<PlaudDeviceIdentity>;
+      if (identity.serial === serial && typeof identity.signature === 'string' && identity.signature
+        && typeof identity.bindingToken === 'string' && BINDING_TOKEN_PATTERN.test(identity.bindingToken)) {
+        return { signature: identity.signature, bindingToken: identity.bindingToken };
+      }
+    } catch { /* absent or unreadable: try the next one */ }
+  }
+  return null;
+}
+
+export async function readPendingIdentity(): Promise<ProvisionedIdentity | null> {
+  try { return JSON.parse(await readFile(pendingIdentityFilePath(), 'utf8')) as ProvisionedIdentity; }
+  catch { return null; }
+}
+export async function writePendingIdentity(identity: ProvisionedIdentity): Promise<void> {
+  await writePrivateJson(pendingIdentityFilePath(), identity);
+}
+export async function clearPendingIdentity(): Promise<void> {
+  await rm(pendingIdentityFilePath(), { force: true });
+}
+
+/**
+ * Removes the active identity. A Plaud-issued key can be minted again, so it is
+ * deleted; a locally generated key is the only way to reach a recorder bound to
+ * it (the Plaud app cannot unlink it), so it is moved aside instead.
+ */
 export async function clearStoredIdentity(): Promise<boolean> {
   const path = identityFilePath();
   if (!existsSync(path)) return false;
-  await rm(path, { force: true });
+  if ((await readStoredIdentity())?.keySource === 'local') await rename(path, previousIdentityFilePath());
+  else await rm(path, { force: true });
   return true;
 }
 
@@ -225,6 +340,8 @@ export async function provisionWithDeveloperCredentials(options: {
   auth?: PlaudDeviceAuth;
   credentials?: Awaited<ReturnType<typeof readDeviceCredentials>>;
   provisioner?: PlaudIdentityProvisioner;
+  keySource?: KeySource;
+  localKeys?: { publicKey: string; privateKey: string };
 }): Promise<ProvisionedIdentity> {
   const credentials = options.credentials ?? await readDeviceCredentials();
   const domain = options.domain ?? (isPlaudDomain(credentials.domain) ? credentials.domain : DEFAULT_PLAUD_DOMAIN);
@@ -234,5 +351,8 @@ export async function provisionWithDeveloperCredentials(options: {
   const auth = options.auth ?? new PlaudDeviceAuth();
   const session = await auth.session({ ...credentials, domain });
   const provisioner = options.provisioner ?? new PlaudIdentityProvisioner();
-  return provisioner.provision({ token: session.userAccessToken, serial: options.serial, identifier: options.identifier, domain });
+  return provisioner.provision({
+    token: session.userAccessToken, serial: options.serial, identifier: options.identifier, domain,
+    keySource: options.keySource, localKeys: options.localKeys,
+  });
 }

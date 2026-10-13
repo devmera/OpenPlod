@@ -1,16 +1,16 @@
 //! Swift-facing operations of the OpenPlod iOS companion.
 //!
-//! The companion only reads from a recorder that is already linked to the key it holds: it scans,
-//! lists, downloads and decrypts. It never pairs, binds, unlinks, force-clears or changes settings.
+//! Swift owns Bluetooth (CoreBluetooth, so iOS can wake the app in the background when the
+//! recorder advertises) and hands this library a `RecorderTransport` for the connected recorder.
+//! This library runs the Plaud protocol over it: key exchange, login, listing, download and
+//! decryption. It only reads: it never pairs, binds, unlinks, force-clears or changes settings.
 //! The key comes from OpenPlod's encrypted enrollment and stays in the iOS Keychain; it is passed
-//! in per call and not stored by this library.
+//! in per call and not stored here.
 
-mod ble;
 mod driver;
 mod link;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Context;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -18,12 +18,8 @@ use base64::Engine as _;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::pkcs8::DecodePrivateKey;
 use rsa::RsaPrivateKey;
-use tokio::sync::Mutex;
 
 uniffi::setup_scaffolding!();
-
-/// One Bluetooth conversation at a time.
-static DEVICE: Mutex<()> = Mutex::const_new(());
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum CompanionError {
@@ -50,30 +46,40 @@ pub struct RecorderKey {
 }
 
 #[derive(uniffi::Record)]
-pub struct NearbyRecorder {
-    pub id: String,
-    pub name: Option<String>,
-    pub rssi: Option<i16>,
-}
-
-#[derive(uniffi::Record)]
 pub struct RecorderFile {
     /// Session id: the recording's start time in Unix seconds.
     pub session_id: u32,
     pub size: u32,
 }
 
-#[derive(uniffi::Record)]
-pub struct PulledFile {
-    pub session_id: u32,
-    /// Decrypted Opus audio, in an Ogg container when the recorder supplies one.
-    pub path: String,
+/// A connected recorder, provided by Swift: frames go to characteristic 0x2BB1 (write without
+/// response) and replies arrive as notifications on 0x2BB0.
+#[uniffi::export(with_foreign)]
+#[async_trait::async_trait]
+pub trait RecorderTransport: Send + Sync {
+    async fn write(&self, frame: Vec<u8>) -> Result<(), CompanionError>;
+    /// The next notification, or an error once `timeout_ms` passes without one.
+    async fn next(&self, timeout_ms: u64) -> Result<Vec<u8>, CompanionError>;
 }
 
 #[uniffi::export(with_foreign)]
 pub trait PullListener: Send + Sync {
     /// `state` is `started`, `saved` or `failed`.
     fn on_progress(&self, session_id: u32, state: String, detail: Option<String>);
+}
+
+struct Foreign {
+    transport: Arc<dyn RecorderTransport>,
+    timeout_ms: u64,
+}
+
+impl link::Link for Foreign {
+    async fn write(&mut self, frame: &[u8]) -> anyhow::Result<()> {
+        self.transport.write(frame.to_vec()).await.map_err(|error| anyhow::anyhow!("{error}"))
+    }
+    async fn next(&mut self) -> anyhow::Result<Vec<u8>> {
+        self.transport.next(self.timeout_ms).await.map_err(|error| anyhow::anyhow!("{error}"))
+    }
 }
 
 struct Key {
@@ -93,77 +99,55 @@ fn decode(key: &RecorderKey) -> anyhow::Result<Key> {
     Ok(Key { serial: key.serial.clone(), token: key.binding_token.clone(), signature, private })
 }
 
-struct Connected {
-    link: ble::BleLink,
-    session: plaud_protocol::session::Session,
-    port: u8,
-}
-
-async fn connect(key: &Key, device: Option<&str>, timeout_secs: u64) -> anyhow::Result<Connected> {
-    let mut link = ble::BleLink::connect(device, Duration::from_secs(timeout_secs)).await?;
-    let keys = driver::handshake(&mut link, &key.signature, &key.private).await
+/// Key exchange and login on an already connected recorder.
+async fn open(link: &mut Foreign, key: &Key) -> anyhow::Result<(plaud_protocol::session::Session, u8)> {
+    let keys = driver::handshake(link, &key.signature, &key.private).await
         .with_context(|| format!("connecting to recorder {}", key.serial))?;
     let mut session = plaud_protocol::session::Session::phone(keys);
-    let port = driver::login(&mut link, &mut session, &key.token).await?;
-    Ok(Connected { link, session, port })
+    let port = driver::login(link, &mut session, &key.token).await?;
+    Ok((session, port))
 }
 
-/// Plaud recorders advertising nearby.
+/// Recordings stored on the connected recorder.
 #[uniffi::export(async_runtime = "tokio")]
-pub async fn scan(seconds: u64) -> Result<Vec<NearbyRecorder>, CompanionError> {
-    let _guard = DEVICE.lock().await;
-    Ok(ble::scan(seconds, false).await?.into_iter()
-        .map(|found| NearbyRecorder { id: found.id, name: found.name, rssi: found.rssi })
-        .collect())
-}
-
-/// Recordings stored on the linked recorder.
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn list_recordings(key: RecorderKey, device: Option<String>, timeout_secs: u64) -> Result<Vec<RecorderFile>, CompanionError> {
-    let _guard = DEVICE.lock().await;
+pub async fn list_recordings(key: RecorderKey, transport: Arc<dyn RecorderTransport>, timeout_secs: u64) -> Result<Vec<RecorderFile>, CompanionError> {
     let key = decode(&key)?;
-    let mut c = connect(&key, device.as_deref(), timeout_secs).await?;
-    let listed = driver::list(&mut c.link, &mut c.session, c.port).await;
-    c.link.disconnect().await.ok();
-    Ok(listed?.into_iter().map(|r| RecorderFile { session_id: r.id, size: r.size }).collect())
+    let mut link = Foreign { transport, timeout_ms: timeout_secs * 1000 };
+    let (mut session, port) = open(&mut link, &key).await?;
+    Ok(driver::list(&mut link, &mut session, port).await?
+        .into_iter().map(|r| RecorderFile { session_id: r.id, size: r.size }).collect())
 }
 
-/// Downloads and decrypts the given sessions into `out_dir` as `<session>.ogg|.opus`, in one
-/// connection. Recordings stay on the recorder. One failure does not stop the others.
+/// One sync on the connected recorder, in a single session: lists its recordings, then downloads
+/// and decrypts every one not in `skip` into `out_dir` as `<session>.ogg|.opus`. Returns the full
+/// list. Recordings stay on the recorder; one failure does not stop the others.
 #[uniffi::export(async_runtime = "tokio")]
-pub async fn pull_recordings(
+pub async fn pull_new_recordings(
     key: RecorderKey,
-    device: Option<String>,
+    transport: Arc<dyn RecorderTransport>,
     timeout_secs: u64,
-    session_ids: Vec<u32>,
+    skip: Vec<u32>,
     out_dir: String,
     listener: Arc<dyn PullListener>,
-) -> Result<Vec<PulledFile>, CompanionError> {
-    let _guard = DEVICE.lock().await;
+) -> Result<Vec<RecorderFile>, CompanionError> {
     let key = decode(&key)?;
     std::fs::create_dir_all(&out_dir).context("creating the download folder")?;
-    let mut c = connect(&key, device.as_deref(), timeout_secs).await?;
-    let result = async {
-        let wanted: Vec<_> = driver::list(&mut c.link, &mut c.session, c.port).await?
-            .into_iter().filter(|r| session_ids.contains(&r.id)).collect();
-        let mut pulled = Vec::new();
-        for recording in &wanted {
-            listener.on_progress(recording.id, "started".into(), None);
-            match driver::pull(&mut c.link, &mut c.session, recording, &key.private).await {
-                Ok(audio) => {
-                    let extension = if audio.starts_with(b"OggS") { "ogg" } else { "opus" };
-                    let path = std::path::Path::new(&out_dir).join(format!("{}.{extension}", recording.id));
-                    let partial = path.with_extension(format!("{extension}.part"));
-                    std::fs::write(&partial, &audio).context("saving the recording")?;
-                    std::fs::rename(&partial, &path).context("saving the recording")?;
-                    listener.on_progress(recording.id, "saved".into(), Some(path.display().to_string()));
-                    pulled.push(PulledFile { session_id: recording.id, path: path.display().to_string() });
-                }
-                Err(error) => listener.on_progress(recording.id, "failed".into(), Some(format!("{error:#}"))),
+    let mut link = Foreign { transport, timeout_ms: timeout_secs * 1000 };
+    let (mut session, port) = open(&mut link, &key).await?;
+    let listed = driver::list(&mut link, &mut session, port).await?;
+    for recording in listed.iter().filter(|r| !skip.contains(&r.id)) {
+        listener.on_progress(recording.id, "started".into(), None);
+        match driver::pull(&mut link, &mut session, recording, &key.private).await {
+            Ok(audio) => {
+                let extension = if audio.starts_with(b"OggS") { "ogg" } else { "opus" };
+                let path = std::path::Path::new(&out_dir).join(format!("{}.{extension}", recording.id));
+                let partial = path.with_extension(format!("{extension}.part"));
+                std::fs::write(&partial, &audio).context("saving the recording")?;
+                std::fs::rename(&partial, &path).context("saving the recording")?;
+                listener.on_progress(recording.id, "saved".into(), Some(path.display().to_string()));
             }
+            Err(error) => listener.on_progress(recording.id, "failed".into(), Some(format!("{error:#}"))),
         }
-        anyhow::Ok(pulled)
-    }.await;
-    c.link.disconnect().await.ok();
-    Ok(result?)
+    }
+    Ok(listed.into_iter().map(|r| RecorderFile { session_id: r.id, size: r.size }).collect())
 }

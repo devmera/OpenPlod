@@ -41,6 +41,10 @@
 	<string>OpenPlod reads the pairing QR code shown by OpenPlod on your Mac.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>OpenPlod contacts OpenPlod on your Mac once, to receive the recorder key.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

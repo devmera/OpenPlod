@@ -1,70 +1,84 @@
 import CryptoKit
 import Foundation
+import UIKit
+import UserNotifications
 
-/// Copies new recordings from the recorder to the NAS. A recording counts as done only after the NAS
-/// confirms the whole file; until then the phone keeps its copy and retries on the next sync.
+/// Copies new recordings from the recorder to the NAS, when asked and whenever the recorder is heard
+/// nearby (also in the background). A recording counts as done only after the NAS confirms the whole
+/// file; until then the phone keeps its copy and retries on the next sync.
 @MainActor
 final class SyncEngine: ObservableObject {
+    static let shared = SyncEngine()
+
     enum Phase: Equatable { case waiting, downloading, downloaded, uploading, done, unreadable, failed(String) }
     struct Item: Identifiable, Equatable { let id: UInt32; var phase: Phase }
 
     @Published private(set) var items: [Item] = []
     @Published private(set) var running = false
     @Published private(set) var summary: String?
+    @Published private(set) var lastSync: Date? = UserDefaults.standard.object(forKey: "lastSync") as? Date
 
+    /// After a sync, the recorder keeps advertising for a while; don't connect again right away.
+    private let cooldown: TimeInterval = 180
+    private var lastAttempt: Date?
     private let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appending(path: "pending", directoryHint: .isDirectory)
 
-    private func doneKey(_ serial: String) -> String { "uploaded.\(serial)" }
-    private func uploaded(_ serial: String) -> Set<UInt32> { Set((UserDefaults.standard.array(forKey: doneKey(serial)) as? [Int] ?? []).map(UInt32.init)) }
-    private func markUploaded(_ serial: String, _ session: UInt32) {
-        UserDefaults.standard.set(Array(uploaded(serial).union([session])).map(Int.init), forKey: doneKey(serial))
-    }
-    /// Recordings made under a key this phone does not hold: not downloaded again until the key changes.
-    private func unreadableKey(_ key: RecorderKey) -> String {
-        "unreadable.\(key.serial).\(SHA256.hash(data: Data(key.privateKey.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined())"
-    }
-    private func unreadable(_ key: RecorderKey) -> Set<UInt32> { Set((UserDefaults.standard.array(forKey: unreadableKey(key)) as? [Int] ?? []).map(UInt32.init)) }
-    private func markUnreadable(_ key: RecorderKey, _ session: UInt32) {
-        UserDefaults.standard.set(Array(unreadable(key).union([session])).map(Int.init), forKey: unreadableKey(key))
+    // MARK: Hands-free sync
+
+    /// The linked recorder was heard advertising: sync if set up and not done very recently.
+    func recorderHeard() {
+        guard !running, let key = KeyStore.load(), let destination = Destination.load(),
+              lastAttempt.map({ Date().timeIntervalSince($0) > cooldown }) ?? true else { return }
+        let background = UIApplication.shared.applicationState != .active
+        let task = UIApplication.shared.beginBackgroundTask(withName: "Sync recordings")
+        Task {
+            let uploaded = await sync(key: key, destination: destination)
+            if background && uploaded > 0 { notify(uploaded) }
+            UIApplication.shared.endBackgroundTask(task)
+        }
     }
 
-    func sync(key: RecorderKey, destination: Destination) async {
-        guard !running else { return }
-        running = true; summary = nil
+    static func requestNotifications() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    private func notify(_ count: Int) {
+        let content = UNMutableNotificationContent()
+        content.title = "Recordings copied"
+        content.body = count == 1 ? "1 new recording is on your NAS." : "\(count) new recordings are on your NAS."
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+    }
+
+    // MARK: Sync
+
+    /// Returns how many recordings were uploaded.
+    @discardableResult
+    func sync(key: RecorderKey, destination: Destination) async -> Int {
+        guard !running else { return 0 }
+        running = true; summary = nil; lastAttempt = Date()
         defer { running = false }
+        var uploadedCount = 0
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let nas = WebDAV(destination: destination)
             try await nas.check()
-            let onRecorder = try await listRecordings(key: key, device: nil, timeoutSecs: 20)
-            let done = uploaded(key.serial), skipped = unreadable(key)
-            let waiting = onRecorder.filter { !done.contains($0.sessionId) && !skipped.contains($0.sessionId) }.map(\.sessionId)
-            // Downloaded on an earlier run but not yet on the NAS.
-            let kept = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
-                .filter { ["ogg", "opus"].contains($0.pathExtension) }
-            let keptIds = Set(kept.compactMap { UInt32($0.deletingPathExtension().lastPathComponent) })
-            items = waiting.map { Item(id: $0, phase: .waiting) }
-            let toDownload = waiting.filter { !keptIds.contains($0) }
-            if !toDownload.isEmpty {
-                let listener = ProgressRelay { [weak self] id, state, detail in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        switch state {
-                        case "started": self.set(id, .downloading)
-                        case "saved": self.set(id, .downloaded)
-                        default:
-                            // Made while the recorder was bound to another key: it can never be decrypted here.
-                            if detail?.contains("decrypting") == true { self.markUnreadable(key, id); self.set(id, .unreadable) }
-                            else { self.set(id, .failed(detail ?? "Download failed")) }
-                        }
-                    }
-                }
-                _ = try await pullRecordings(key: key, device: nil, timeoutSecs: 20, sessionIds: toDownload, outDir: folder.path, listener: listener)
+            let kept = Set(localFiles().compactMap { UInt32($0.deletingPathExtension().lastPathComponent) })
+            let skip = uploaded(key.serial).union(unreadable(key)).union(kept)
+            items = []
+            let connection = try await RecorderBluetooth.shared.connect()
+            let listener = ProgressRelay { [weak self] id, state, detail in
+                Task { @MainActor in self?.progress(key, id, state, detail) }
             }
-            var uploadedCount = 0
-            for file in try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) where ["ogg", "opus"].contains(file.pathExtension) {
+            do {
+                _ = try await pullNewRecordings(key: key, transport: connection, timeoutSecs: 20, skip: Array(skip), outDir: folder.path, listener: listener)
+                RecorderBluetooth.shared.disconnect(connection)
+            } catch {
+                RecorderBluetooth.shared.disconnect(connection)
+                throw error
+            }
+            for file in localFiles() {
                 guard let session = UInt32(file.deletingPathExtension().lastPathComponent) else { continue }
-                if items.first(where: { $0.id == session }) == nil { items.append(Item(id: session, phase: .waiting)) }
+                if !items.contains(where: { $0.id == session }) { items.append(Item(id: session, phase: .downloaded)) }
                 set(session, .uploading)
                 do {
                     let name = "Plaud-\(session).\(file.pathExtension)"
@@ -82,16 +96,51 @@ final class SyncEngine: ObservableObject {
             }
             let failed = items.filter { if case .failed = $0.phase { true } else { false } }.count
             let otherKey = items.filter { $0.phase == .unreadable }.count
-            summary = waiting.isEmpty && uploadedCount == 0 ? "Everything is already on the NAS."
+            summary = items.isEmpty ? "Everything is already on the NAS."
                 : "\(uploadedCount) uploaded" + (failed > 0 ? ", \(failed) will be retried next sync" : "")
-                    + (otherKey > 0 ? ", \(otherKey) made under another key skipped" : "") + "." 
+                    + (otherKey > 0 ? ", \(otherKey) made under another key skipped" : "") + "."
+            lastSync = Date(); UserDefaults.standard.set(lastSync, forKey: "lastSync")
         } catch {
             summary = error.localizedDescription
         }
+        return uploadedCount
+    }
+
+    private func progress(_ key: RecorderKey, _ id: UInt32, _ state: String, _ detail: String?) {
+        if !items.contains(where: { $0.id == id }) { items.append(Item(id: id, phase: .waiting)) }
+        switch state {
+        case "started": set(id, .downloading)
+        case "saved": set(id, .downloaded)
+        default:
+            // Made while the recorder was bound to another key: it can never be decrypted here.
+            if detail?.contains("decrypting") == true { markUnreadable(key, id); set(id, .unreadable) }
+            else { set(id, .failed(detail ?? "Download failed")) }
+        }
+    }
+
+    private func localFiles() -> [URL] {
+        ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
+            .filter { ["ogg", "opus"].contains($0.pathExtension) }
     }
 
     private func set(_ id: UInt32, _ phase: Phase) {
         if let index = items.firstIndex(where: { $0.id == id }) { items[index].phase = phase }
+    }
+
+    // MARK: Bookkeeping
+
+    private func doneKey(_ serial: String) -> String { "uploaded.\(serial)" }
+    private func uploaded(_ serial: String) -> Set<UInt32> { Set((UserDefaults.standard.array(forKey: doneKey(serial)) as? [Int] ?? []).map(UInt32.init)) }
+    private func markUploaded(_ serial: String, _ session: UInt32) {
+        UserDefaults.standard.set(Array(uploaded(serial).union([session])).map(Int.init), forKey: doneKey(serial))
+    }
+    /// Recordings made under a key this phone does not hold: not downloaded again until the key changes.
+    private func unreadableKey(_ key: RecorderKey) -> String {
+        "unreadable.\(key.serial).\(SHA256.hash(data: Data(key.privateKey.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined())"
+    }
+    private func unreadable(_ key: RecorderKey) -> Set<UInt32> { Set((UserDefaults.standard.array(forKey: unreadableKey(key)) as? [Int] ?? []).map(UInt32.init)) }
+    private func markUnreadable(_ key: RecorderKey, _ session: UInt32) {
+        UserDefaults.standard.set(Array(unreadable(key).union([session])).map(Int.init), forKey: unreadableKey(key))
     }
 
     /// The metadata OpenPlod's folder import reads to keep the recorder's source id and start time.

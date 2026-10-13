@@ -8,7 +8,7 @@ struct RecorderView: View {
     @State private var message: String?
     @State private var destination = Destination.load()
     @State private var editingDestination = false
-    @StateObject private var engine = SyncEngine()
+    @ObservedObject private var engine = SyncEngine.shared
 
     var body: some View {
         NavigationStack {
@@ -16,7 +16,11 @@ struct RecorderView: View {
                 List {
                     Section {
                         LabeledContent("Recorder", value: key.serial)
-                        Button { run("Reading recorder…") { recordings = try await listRecordings(key: key, device: nil, timeoutSecs: 20) } }
+                        Button { run("Reading recorder…") {
+                            let connection = try await RecorderBluetooth.shared.connect()
+                            defer { RecorderBluetooth.shared.disconnect(connection) }
+                            recordings = try await listRecordings(key: key, transport: connection, timeoutSecs: 20)
+                        } }
                             label: { Label("List recordings", systemImage: "list.bullet") }
                     } footer: { status }
                     Section {
@@ -27,7 +31,13 @@ struct RecorderView: View {
                             }.disabled(engine.running)
                         }
                         Button(destination == nil ? "Set up NAS" : "Change NAS") { editingDestination = true }
-                    } header: { Text("Upload") } footer: { if let summary = engine.summary { Text(summary) } }
+                    } header: { Text("Upload") } footer: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let summary = engine.summary { Text(summary) }
+                            Text(engine.lastSync.map { "Syncs automatically when the recorder is nearby. Last sync \($0.formatted(.relative(presentation: .named)))." }
+                                 ?? "Syncs automatically when the recorder is nearby, also with the app in the background.")
+                        }
+                    }
                     if !engine.items.isEmpty {
                         Section("This sync") {
                             ForEach(engine.items) { item in
@@ -48,14 +58,14 @@ struct RecorderView: View {
                         }
                     }
                     Section {
-                        Button("Unlink this phone", role: .destructive) { KeyStore.remove(); self.key = nil; recordings = [] }
+                        Button("Unlink this phone", role: .destructive) { KeyStore.remove(); self.key = nil; recordings = []; RecorderBluetooth.shared.watch(serial: nil) }
                     } footer: { Text("Removes the recorder key from this phone only. The recorder and your Mac are not changed.") }
                 }
                 .navigationTitle("OpenPlod")
                 .disabled(busy != nil)
                 .sheet(isPresented: $editingDestination) { DestinationView { saved in destination = saved } }
             } else {
-                LinkView { linked in key = linked }
+                LinkView { linked in key = linked; RecorderBluetooth.shared.watch(serial: linked.serial); SyncEngine.requestNotifications() }
             }
         }
     }

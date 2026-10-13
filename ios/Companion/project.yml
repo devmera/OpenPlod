@@ -29,6 +29,8 @@ targets:
         CFBundleDisplayName: OpenPlod
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # Woken in the background when the linked recorder advertises (CoreBluetooth state restoration).
+        UIBackgroundModes: [bluetooth-central]
         NSBluetoothAlwaysUsageDescription: >-
           OpenPlod connects to your Plaud recorder over Bluetooth to copy your recordings.
         NSCameraUsageDescription: >-

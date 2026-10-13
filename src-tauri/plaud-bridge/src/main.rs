@@ -13,6 +13,10 @@
 //! * `plaud-bridge connect <identifier>` — connect to a recorder and speak the
 //!   JSON-lines bridge protocol until stdin closes or the session ends.  This
 //!   mirrors `scripts/plaud-bridge.swift`.
+//! * `plaud-bridge watch` — listen for recorder advertisements without ever
+//!   connecting, printing a `seen` line per recorder per listening window until
+//!   stdin closes.  Lets the vault sync the moment a recorder wakes, at no cost
+//!   to the recorder's battery.
 //! * `plaud-bridge doctor` — report the host Bluetooth stack (backend, adapter,
 //!   power state) as a single JSON object without scanning.  The vault uses it
 //!   to autodetect what this machine can do before offering a transfer.
@@ -29,10 +33,10 @@ use std::time::{Duration, Instant};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use btleplug::api::{
-    Central, CentralState, CharPropFlags, Manager as _, Peripheral as _, PeripheralProperties,
+    Central, CentralEvent, CentralState, CharPropFlags, Manager as _, Peripheral as _, PeripheralProperties,
     ScanFilter, WriteType,
 };
-use btleplug::platform::{Adapter, Manager, Peripheral};
+use btleplug::platform::{Adapter, Manager, Peripheral, PeripheralId};
 use futures::stream::StreamExt;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::pkcs8::DecodePrivateKey;
@@ -80,12 +84,13 @@ fn main() {
     let result = match mode {
         "doctor" => runtime.block_on(run_doctor()),
         "scan" => runtime.block_on(run_scan()),
+        "watch" => runtime.block_on(run_watch()),
         "connect" => {
             let identifier = args.get(2).cloned().unwrap_or_default();
             runtime.block_on(run_connect(identifier))
         }
         _ => {
-            eprintln!("usage: plaud-bridge <doctor|scan|connect> [identifier]");
+            eprintln!("usage: plaud-bridge <doctor|scan|watch|connect> [identifier]");
             std::process::exit(2);
         }
     };
@@ -262,6 +267,86 @@ async fn run_doctor() -> Result<(), String> {
     };
     println!("{report}");
     let _ = std::io::stdout().flush();
+    Ok(())
+}
+
+/// One listening window, then a pause; the recorder advertises for several
+/// seconds after it wakes, so a window this long cannot miss it.
+const WATCH_WINDOW: Duration = Duration::from_secs(4);
+const WATCH_PAUSE: Duration = Duration::from_secs(4);
+
+/// Recorder serial in a manufacturer-data advertisement, if it carries one.
+fn advertised_serial(manufacturer_data: &std::collections::HashMap<u16, Vec<u8>>) -> Option<String> {
+    let framed: Vec<Value> = manufacturer_data
+        .iter()
+        .map(|(company, bytes)| {
+            let mut data = company.to_le_bytes().to_vec();
+            data.extend_from_slice(bytes);
+            json!({ "data": BASE64.encode(data) })
+        })
+        .collect();
+    parse_note_pro_advertisement(&framed).0
+}
+
+/// Listens for recorders without connecting.  Each window restarts the scan and
+/// reads the live event stream, because the platform's peripheral list keeps
+/// recorders that stopped advertising long ago: only a fresh advertisement says
+/// the recorder is awake now.
+async fn run_watch() -> Result<(), String> {
+    let adapter = adapter().await?;
+    let stdin_closed = tokio::spawn(async {
+        let mut lines = BufReader::new(tokio::io::stdin()).lines();
+        while let Ok(Some(_)) = lines.next_line().await {}
+    });
+    println!("{}", json!({ "event": "ready" }));
+    let _ = std::io::stdout().flush();
+    while !stdin_closed.is_finished() {
+        let mut events = adapter
+            .events()
+            .await
+            .map_err(|error| format!("Bluetooth events unavailable: {error}"))?;
+        adapter
+            .start_scan(ScanFilter::default())
+            .await
+            .map_err(|error| format!("Bluetooth scan could not start: {error}"))?;
+        let mut seen: std::collections::HashMap<String, (PeripheralId, String)> = std::collections::HashMap::new();
+        let deadline = tokio::time::sleep(WATCH_WINDOW);
+        tokio::pin!(deadline);
+        loop {
+            tokio::select! {
+                _ = &mut deadline => break,
+                event = events.next() => match event {
+                    Some(CentralEvent::ManufacturerDataAdvertisement { id, manufacturer_data }) => {
+                        if let Some(serial) = advertised_serial(&manufacturer_data) {
+                            let raw = manufacturer_data
+                                .iter()
+                                .map(|(company, bytes)| {
+                                    let mut data = company.to_le_bytes().to_vec();
+                                    data.extend_from_slice(bytes);
+                                    BASE64.encode(data)
+                                })
+                                .collect::<Vec<_>>()
+                                .join(",");
+                            seen.insert(serial, (id, raw));
+                        }
+                    }
+                    Some(_) => {}
+                    None => break,
+                },
+            }
+        }
+        let _ = adapter.stop_scan().await;
+        for (serial, (id, advertisement)) in seen {
+            let Ok(peripheral) = adapter.peripheral(&id).await else { continue };
+            let rssi = peripheral.properties().await.ok().flatten().and_then(|properties| properties.rssi);
+            println!("{}", json!({
+                "event": "seen", "serial": serial, "identifier": peripheral_identifier(&peripheral), "rssi": rssi,
+                "advertisement": advertisement,
+            }));
+        }
+        let _ = std::io::stdout().flush();
+        tokio::time::sleep(WATCH_PAUSE).await;
+    }
     Ok(())
 }
 

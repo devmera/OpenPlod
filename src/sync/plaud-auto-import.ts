@@ -10,6 +10,7 @@ export class PlaudAutoImport {
   private error: string | null = null;
   private failures = 0;
   private retryAt = 0;
+  private lastSync: { at: string; imported: number } | null = null;
   constructor(private database: Database, private adapter = { configured: directPlaudConfigured, list: readDirectPlaudRecordings, import: importDirectPlaudRecording }) {
     database.exec(`CREATE TABLE IF NOT EXISTS plaud_import_events (id INTEGER PRIMARY KEY AUTOINCREMENT, recording_id TEXT NOT NULL, created_at TEXT NOT NULL);`);
   }
@@ -19,13 +20,20 @@ export class PlaudAutoImport {
     this.database.query("INSERT INTO user_settings(key,value) VALUES('directPlaudAutoImport',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(enabled));
     return this.status();
   }
-  status() { return { enabled: this.enabled(), running: this.running, lastChecked: this.lastChecked, error: this.error,
+  status() { return { enabled: this.enabled(), running: this.running, lastChecked: this.lastChecked, lastSync: this.lastSync, error: this.error,
     events: this.database.query('SELECT id,recording_id AS recordingId,created_at AS createdAt FROM plaud_import_events ORDER BY id DESC LIMIT 10').all() }; }
-  async tick() {
-    if (this.running || !this.enabled() || Date.now() < this.retryAt) return;
+  /**
+   * One sync round. `settleMs` confirms within this connection which recordings
+   * are complete (instead of waiting for the next round); `force` is "Sync now"
+   * and skips the back-off after failures.
+   */
+  async tick(options: { settleMs?: number; force?: boolean } = {}) {
+    if (this.running || !this.enabled() || (!options.force && Date.now() < this.retryAt)) return;
     this.running = true;
+    let imported = 0;
     try {
-      const result = await this.adapter.list(); this.lastChecked = result.checkedAt;
+      const result = await this.adapter.list(options.settleMs ? { settleMs: options.settleMs } : undefined); this.lastChecked = result.checkedAt;
+      const settled = result.stable ? new Set(result.stable) : null;
       const observed = new Map<string, number>();
       const existing = new Set((this.database.query(
         `SELECT source_recording_id AS sourceId FROM recordings WHERE source_provider=? AND source_recording_id IS NOT NULL`,
@@ -33,21 +41,25 @@ export class PlaudAutoImport {
       for (const session of result.sessions) {
         const source = `${result.serial}:${session.sessionId}`; observed.set(source, session.size);
         if (!this.enabled()) break;
-        // Wait for an unchanged second observation so in-progress recordings are not imported.
-        if (session.size <= 512 || this.previous.get(source) !== session.size) continue;
+        // Import only recordings whose size held still (within this connection, or since the last round).
+        if (session.size <= 512 || !(settled?.has(session.sessionId) || this.previous.get(source) === session.size)) continue;
         if (existing.has(source) || this.unreadable.has(source)) continue;
-        let imported: Awaited<ReturnType<typeof this.adapter.import>>;
-        try { imported = await this.adapter.import(session.sessionId); }
+        let outcome: Awaited<ReturnType<typeof this.adapter.import>>;
+        try { outcome = await this.adapter.import(session.sessionId); }
         catch (error) {
           // One recording made under another key must not block the ones after it.
           if (!/cannot be decrypted here/.test(error instanceof Error ? error.message : '')) throw error;
           this.unreadable.add(source);
           continue;
         }
-        if (imported.added || imported.recording.sourceRecordingId === source) existing.add(source);
-        if (imported.added) this.database.query('INSERT INTO plaud_import_events(recording_id,created_at) VALUES(?,?)').run(imported.recording.id, new Date().toISOString());
+        if (outcome.added || outcome.recording.sourceRecordingId === source) existing.add(source);
+        if (outcome.added) {
+          imported++;
+          this.database.query('INSERT INTO plaud_import_events(recording_id,created_at) VALUES(?,?)').run(outcome.recording.id, new Date().toISOString());
+        }
       }
       this.previous = observed; this.failures = 0; this.retryAt = 0;
+      this.lastSync = { at: result.checkedAt, imported };
       const skipped = result.sessions.filter(session => this.unreadable.has(`${result.serial}:${session.sessionId}`)).length;
       this.error = skipped ? `${skipped} recording${skipped === 1 ? ' was' : 's were'} made under a key this computer does not hold and ${skipped === 1 ? 'was' : 'were'} skipped.` : null;
       this.database.query('DELETE FROM plaud_import_events WHERE id NOT IN (SELECT id FROM plaud_import_events ORDER BY id DESC LIMIT 100)').run();

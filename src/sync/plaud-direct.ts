@@ -5,6 +5,7 @@ import { PlaudConnection, type PlaudIdentity } from './plaud-connection';
 import { PlaudTransport } from './plaud-transport';
 import { decodePlaudAudio } from './plaud-audio';
 import { downloadPlaudSession, listPlaudSessions, recordingHandshake, unlinkRecorder } from './plaud-transfer';
+import type { PlaudSessionEntry } from './plaud-protocol';
 import { fingerprintFile, importRecordingFile } from '../library/recording-library';
 import { openPlaudCheckpoint } from './plaud-checkpoint';
 import { bluetoothSupported, isBluetoothIdentifier, isDesktopPlatform } from './plaud-bridge';
@@ -112,9 +113,25 @@ export async function unlinkDirectPlaud(): Promise<{ confirmed: boolean }> {
   return withDevice(connection => unlinkRecorder(connection));
 }
 
-export async function readDirectPlaudRecordings() {
-  return withDevice(async (connection, identity) => ({ serial: identity.serial,
-    sessions: await listPlaudSessions(connection), checkedAt: new Date().toISOString() }));
+/**
+ * Lists the recorder's recordings. With `settleMs`, lists again after that pause
+ * in the same connection and reports which recordings kept their size: a
+ * recording still being written grows, so only `stable` ones are safe to import.
+ */
+export async function readDirectPlaudRecordings(options: { settleMs?: number } = {}): Promise<{
+  serial: string; sessions: PlaudSessionEntry[]; checkedAt: string; stable?: number[];
+}> {
+  return withDevice(async (connection, identity) => {
+    let sessions = await listPlaudSessions(connection);
+    let stable: number[] | undefined;
+    if (options.settleMs) {
+      const first = new Map(sessions.map(session => [session.sessionId, session.size]));
+      await Bun.sleep(options.settleMs);
+      sessions = await listPlaudSessions(connection);
+      stable = sessions.filter(session => first.get(session.sessionId) === session.size).map(session => session.sessionId);
+    }
+    return { serial: identity.serial, sessions, stable, checkedAt: new Date().toISOString() };
+  });
 }
 
 async function durableCopy(source: string, destination: string) {

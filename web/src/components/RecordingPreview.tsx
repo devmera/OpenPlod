@@ -116,7 +116,7 @@ export function RecordingPreview({
     const abort = new AbortController();
     let player: WaveSurfer | undefined;
     const host = container.current;
-    void Promise.all([import("wavesurfer.js"), api.getAudioBlob(id, abort.signal)])
+    void Promise.all([import("wavesurfer.js"), api.getAudioBlob(id, abort.signal, { playback: true })])
       .then(async ([{ default: Wave }, blob]) => {
         if (disposed) return;
         objectUrl = URL.createObjectURL(blob);
@@ -244,7 +244,7 @@ export function RecordingPreview({
             recordingId: id,
             filename: recording.filename,
           });
-        } else await exportOriginalAudio(recording, audioUrl.current);
+        } else await exportOriginalAudio(recording);
       } else
         await exportDocument({
           filename: `${safeDocumentName(recording.title)}.${format}`,

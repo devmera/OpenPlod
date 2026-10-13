@@ -934,15 +934,16 @@ export const api = {
     return res.data.runId
   },
 
-  getAudioBlob: async (id: string, signal?: AbortSignal): Promise<Blob> => {
-    const timeout = AbortSignal.timeout(30000)
-    const res = await fetch(apiUrl(`/recordings/${id}/audio`), { headers: authenticatedHeaders(), signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
+  /** `playback` asks for audio with an exact timeline (formats that drift in WebKit are converted once, server side). */
+  getAudioBlob: async (id: string, signal?: AbortSignal, options: { playback?: boolean } = {}): Promise<Blob> => {
+    const timeout = AbortSignal.timeout(options.playback ? 180000 : 30000)
+    const res = await fetch(apiUrl(`/recordings/${id}/audio${options.playback ? '?playback=1' : ''}`), { headers: authenticatedHeaders(), signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
     if (!res.ok) throw new Error(`Could not load audio: ${res.status}`)
     return res.blob()
   },
 
   getAudioObjectUrl: async (id: string): Promise<string> => {
-    return URL.createObjectURL(await api.getAudioBlob(id))
+    return URL.createObjectURL(await api.getAudioBlob(id, undefined, { playback: true }))
   },
 
   getMeetings: async (signal?: AbortSignal): Promise<MeetingStatus> =>

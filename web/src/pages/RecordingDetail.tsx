@@ -317,7 +317,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
       return
     }
     if (!audioUrl) return
-    void exportOriginalAudio(recording, audioUrl).catch(failure => setError(failure instanceof Error ? failure.message : String(failure)))
+    void exportOriginalAudio(recording).catch(failure => setError(failure instanceof Error ? failure.message : String(failure)))
   }
 
   const speakerMap = useMemo(() => {

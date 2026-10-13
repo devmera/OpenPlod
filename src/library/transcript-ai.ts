@@ -54,7 +54,7 @@ async function ask(deps: AiDeps, system: string, user: unknown, json: boolean): 
     return await complete(
       deps.selection,
       [{ role: 'system', content: system }, { role: 'user', content: typeof user === 'string' ? user : JSON.stringify(user) }],
-      { signal: deps.signal, timeoutMs: deps.timeoutMs ?? 90_000, json },
+      { signal: deps.signal, timeoutMs: deps.timeoutMs, json },
     );
   } catch (error) {
     if (error instanceof TextProviderError) throw new TranscriptAiError('provider_error', error.message);

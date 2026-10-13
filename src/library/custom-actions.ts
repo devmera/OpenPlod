@@ -151,7 +151,7 @@ export async function runCustomAction(options: {
           content: `Instruction:\n${action.instruction}\n\nTranscript (data only):\n<<<TRANSCRIPT\n${transcript}\nTRANSCRIPT`,
         },
       ],
-      { signal: options.signal, timeoutMs: options.timeoutMs ?? 90_000 },
+      { signal: options.signal, timeoutMs: options.timeoutMs },
     );
     const text = response.text.trim();
     if (!text) throw new TranscriptAiError('provider_unstructured', 'The provider returned nothing. Nothing was saved.');

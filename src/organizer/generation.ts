@@ -23,7 +23,7 @@ export class DocumentGenerationService {
   constructor(private store: OrganizerStore, private fetcher: GenerationFetch = fetch, private key = () => {
     const row = store.database.query('SELECT value FROM user_settings WHERE key=?').get('mistralApiKey') as { value: string } | null;
     return row?.value || process.env.MISTRAL_API_KEY;
-  }, private timeoutMs = 90000) {}
+  }, private timeoutMs?: number) {}
 
   private row(id: string): Row {
     const row = this.store.database.query(`SELECT id, request_hash AS requestHash, recording_id AS recordingId,

@@ -518,7 +518,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
                   <div className="summary-regenerate"><Button variant="ghost" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <RotateCcw />}Summarize again</Button></div>
                 </div>
               ) : (
-                <div className="inspector-empty summary-empty"><p>No summary yet.</p><Button variant="outline" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null || !recording.transcriptText}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <AlignLeft />}Generate summary</Button></div>
+                processing ? <ProcessingState processing={processing} /> : <div className="inspector-empty summary-empty"><p>No summary yet.</p><Button variant="outline" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null || !recording.transcriptText}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <AlignLeft />}Generate summary</Button></div>
               )
             ) : documentMode === 'studio' ? (
               <TranscriptStudio recording={recording} onChanged={loadRecording} />

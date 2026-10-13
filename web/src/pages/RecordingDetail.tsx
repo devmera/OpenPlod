@@ -41,6 +41,7 @@ import { activeWordIndex, followedSegmentIndex, hasWordTiming } from '@/lib/tran
 import { TranscribeDialog } from '@/components/TranscribeDialog'
 import { RecordingBookmarks } from '@/components/RecordingBookmarks'
 import { SegmentEditor } from '@/components/SegmentEditor'
+import { SpeakerBar } from '@/components/SpeakerBar'
 import { api, speakerLabel, type Recording, type TranscriptSegment, type TranscriptVersion } from '@/lib/api'
 import { useLibraryChanges } from '@/lib/library-changes'
 import { formatDuration } from '@/lib/utils'
@@ -87,6 +88,16 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
   // between segments does not send the transcript back to the top.
   const [followIndex, setFollowIndex] = useState(-1)
   const [following, setFollowing] = useState(true)
+  const [speakerFilter, setSpeakerFilter] = useState<string | null>(null)
+  // The player stays pinned under the title bar while the transcript scrolls; the bar's height varies when its actions wrap.
+  const toolbar = useRef<HTMLElement>(null), [toolbarHeight, setToolbarHeight] = useState(76)
+  useEffect(() => {
+    const element = toolbar.current
+    if (!element) return
+    const observer = new ResizeObserver(() => setToolbarHeight(element.offsetHeight))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [loading])
   const activeRow = useRef<HTMLDivElement>(null)
   const [titleDraft, setTitleDraft] = useState('')
   const [contextDraft, setContextDraft] = useState('')
@@ -342,9 +353,9 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
   }
 
   return (
-    <div className="recording-page">
+    <div className="recording-page" style={{ "--recording-toolbar-height": `${toolbarHeight}px` } as React.CSSProperties}>
       {transcribeOpen && <TranscribeDialog recordingId={recording.id} title={recording.title} onClose={() => setTranscribeOpen(false)} onQueued={() => { setRecording(current => current ? { ...current, status: 'pending' } : current) }} />}
-      <header className="recording-toolbar">
+      <header className="recording-toolbar" ref={toolbar}>
         <Link to={backPath} className="recording-back" aria-label={backPath === '/transcripts' ? 'Back to transcripts' : 'Back to library'}><ArrowLeft /></Link>
         <div className="recording-title-block">
           {editingMetadata ? (
@@ -458,8 +469,18 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
                   </label>
                   <small>{wordTiming ? 'Word timings available' : 'No word timings from this provider; following by segment'}</small>
                 </div>
+                {!selectedVersion && <SpeakerBar segments={displaySegments} colorIndex={speakerMap} filter={speakerFilter} onFilter={setSpeakerFilter}
+                  onNext={label => {
+                    const theirs = displaySegments.filter(segment => segment.speaker === label)
+                    const next = theirs.find(segment => segment.startTime > currentTime + 0.5) ?? theirs[0]
+                    if (next) seekTo(next.startTime)
+                  }}
+                  onRename={async (from, to) => {
+                    await api.transcriptOperations(recording.id, [{ op: 'rename-speaker', from, to }], { revision: recording.revision })
+                    await loadRecording()
+                  }} />}
                 <div className="segment-list">
-                  {displaySegments.map((segment, index) => (
+                  {displaySegments.map((segment, index) => speakerFilter && segment.speaker !== speakerFilter ? null : (
                     <div key={segment.id} className="flex items-start gap-1" ref={index === followIndex ? activeRow : undefined}>
                     <button type="button" className={`flex-1 min-w-0 ${activeSegment === segment.id ? 'segment-row active' : 'segment-row'}`} onClick={() => seekTo(segment.startTime)}>
                       <span className={`speaker-mark speaker-${(speakerMap.get(segment.speaker) ?? 0) % 6}`} />

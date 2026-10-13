@@ -543,3 +543,21 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .device-desktop > svg { width: 36px; height: 36px; margin-bottom: 16px; color: var(--primary); }
 .device-desktop p { color: var(--muted-foreground); margin-block: 12px 24px; max-width: 48ch; }
 @media (max-width: 640px) { .device-page { padding: 20px 16px; } .device-recording-row button { min-width: 44px; min-height: 44px; } }
+
+/* The player stays visible under the title bar while the transcript scrolls. */
+.player-strip { position: sticky; z-index: 19; top: var(--recording-toolbar-height, 76px); }
+
+/* Speakers in this transcript: filter, jump to next line, rename. */
+.speaker-bar { display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--border); padding: 12px 28px; }
+.speaker-chip { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); padding: 2px; }
+.speaker-chip.selected { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, var(--background)); }
+.speaker-chip > button { display: grid; min-width: 26px; height: 28px; place-items: center; border-radius: 6px; color: var(--muted-foreground); }
+.speaker-chip > button:hover { background: var(--secondary); color: var(--foreground); }
+.speaker-chip > button svg { width: 14px; height: 14px; }
+.speaker-chip-main.speaker-chip-main { display: flex; align-items: center; gap: 8px; padding: 0 8px; }
+.speaker-chip-main .speaker-mark { margin-top: 0; }
+.speaker-chip-main strong { font-size: 12px; font-weight: 600; color: var(--foreground); }
+.speaker-chip-main small, .speaker-chip.editing small { color: var(--muted-foreground); font-size: 11px; font-variant-numeric: tabular-nums; }
+.speaker-chip.editing { gap: 6px; padding: 2px 6px; }
+.speaker-chip.editing input { width: 150px; height: 28px; border: 0; border-bottom: 1px solid var(--primary); background: transparent; color: var(--foreground); font-size: 12px; outline: none; }
+.speaker-bar-error { width: 100%; color: var(--destructive); font-size: 12px; }

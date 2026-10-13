@@ -1376,3 +1376,8 @@
 @media (prefers-reduced-motion: reduce) {
   .plaud-transfer-progress > div { transition: none; }
 }
+/* Clicking a preview line plays from there. */
+.preview-segment-text { display: block; width: 100%; text-align: left; font-size: 13px; line-height: 1.65; color: var(--secondary-foreground); border-radius: 4px; cursor: pointer; }
+.preview-segment-text:hover:not(:disabled) { color: var(--foreground); }
+.preview-segment-text:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.preview-segment.current .preview-segment-text { color: var(--foreground); }

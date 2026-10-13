@@ -29,6 +29,8 @@ import { configuredSyncPath, purgeExpiredTrash } from './library/recording-libra
 import { saveGeneratedTranscript } from './library/transcript-history';
 import { forwardRecordingWithRetry } from './library/forwarding';
 import { createAiSettingsApi } from './api/ai-settings';
+import { createObsidianApi } from './api/obsidian';
+import { ObsidianExporter } from './library/obsidian-export';
 import { createJobsApi } from './api/jobs';
 import { aiConfigSchema, readAiConfig, readSettings, assertPrivacy } from './ai/config';
 import packageInfo from '../package.json';
@@ -168,6 +170,11 @@ app.route('/api/v1/jobs', createJobsApi(jobQueue, sqlite));
 app.route('/api/v1', createOrganizerApi(organizer));
 app.route('/api/ai', createRecordingAiApi(new RecordingAi(organizer)));
 app.route('/api/ai-settings', createAiSettingsApi(sqlite));
+const obsidian = new ObsidianExporter(sqlite);
+app.route('/api/obsidian', createObsidianApi(obsidian));
+// Automatic export: notes follow finished transcripts, summaries and edits within seconds.
+const exportToObsidian = () => void obsidian.run({ onlyIfAuto: true }).catch(error => console.error('[Obsidian] Export failed:', error));
+setInterval(exportToObsidian, 15000).unref();
 
 // Settings
 app.get('/api/settings', async (c) => {

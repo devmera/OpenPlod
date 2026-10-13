@@ -31,6 +31,7 @@ import {
   Code,
 } from "@/components/icons";
 import { loadWaveform } from '@/lib/audio-loader';
+import { describeExport, obsidianApi } from '@/lib/obsidian';
 import { IconButton } from './ui/icon-button';
 import { PlaybackSpeedMenu } from './PlaybackSpeedMenu';
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
@@ -334,6 +335,15 @@ export function RecordingPreview({
               </DropdownMenu.Item>
               <DropdownMenu.Item onSelect={() => void download("md")}>
                 <Download />Export Markdown
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                disabled={!recording?.transcriptText}
+                onSelect={() => {
+                  setNotice("");
+                  obsidianApi.exportRecording(id).then(result => setNotice(describeExport(result))).catch(e => setNotice(e.message));
+                }}
+              >
+                <FileText />Send to Obsidian
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>

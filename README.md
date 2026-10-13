@@ -445,7 +445,7 @@ Support helps fund test devices, Mac/Android compatibility work, fresh-install o
 
 **Is everything local?** Audio retention and the organizer are local. Cloud providers receive audio or transcript text when selected. Choose **Local only** for Whisper.cpp transcription and local Ollama text processing. Both require separately installed local models; remote Ollama models are excluded.
 
-**Can I use Obsidian?** Export Markdown and place it in your Obsidian vault. OpenPlod's folders live in SQLite; there is no automatic bidirectional Obsidian-folder sync.
+**Can I use Obsidian?** Yes, one way. In **Settings > Obsidian**, choose a vault and folder: each transcribed recording becomes a note with its summary, action items and speaker-labelled transcript, and optional automatic export keeps it current as transcripts and summaries change. OpenPlod rewrites only the block between its markers and its own properties (`openplod_id`, `recorded`, `duration`, `source`, `speakers`); your text and other properties are kept. If you edit inside the block or delete the note, OpenPlod stops and lists it under Settings instead of overwriting or recreating it. Notes are found again after you rename or move them. Audio stays in OpenPlod.
 
 **Can the phone replace the Mac for Plaud extraction?** Yes, for the tested authorized Note Pro, after one-time encrypted enrollment from the Mac. Audio then travels directly from Plaud to Android. The desktop vault, transcript processing, and AI workspace still use the paired Mac.
 

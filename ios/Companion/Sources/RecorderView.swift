@@ -7,7 +7,9 @@ struct RecorderView: View {
     @State private var showingSettings = false
     @State private var editingDestination = false
     @State private var expanded: UInt32?
-    @StateObject private var player = AudioPlayer()
+    /// Held, not observed: playback position changes several times a second, and only the expanded
+    /// row's player should redraw for it, not the whole list.
+    @State private var player = AudioPlayer()
     @ObservedObject private var engine = SyncEngine.shared
     @ObservedObject private var beacon = BeaconWake.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -163,7 +165,7 @@ struct RecorderView: View {
 
     private func row(_ item: SyncEngine.LibraryItem) -> some View {
         HStack(spacing: 14) {
-            Image(systemName: expanded == item.id && player.playing ? "speaker.wave.2.fill" : "play.fill").font(.body.weight(.medium)).foregroundStyle(.tint)
+            RowIcon(player: player, active: expanded == item.id)
                 .frame(width: 36, height: 36).background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.date.formatted(date: .omitted, time: .shortened)).font(.body.monospacedDigit())
@@ -195,6 +197,16 @@ struct RecorderView: View {
         case .unreadable: Label("Other key", systemImage: "key.slash").foregroundStyle(.secondary)
         case .failed(let reason): Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(.red).lineLimit(2)
         }
+    }
+}
+
+/// The row's leading icon; observes the player itself so only this icon redraws on play/pause.
+private struct RowIcon: View {
+    @ObservedObject var player: AudioPlayer
+    let active: Bool
+    var body: some View {
+        Image(systemName: active && player.playing ? "speaker.wave.2.fill" : "play.fill")
+            .font(.body.weight(.medium)).foregroundStyle(.tint)
     }
 }
 

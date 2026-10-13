@@ -13,17 +13,23 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var player: AVAudioPlayer?
     private var timer: Timer?
 
-    func load(_ url: URL) throws {
-        // Plays with the silent switch on and keeps going with the screen locked.
-        try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
-        try AVAudioSession.sharedInstance().setActive(true)
-        let player = try AVAudioPlayer(contentsOf: url)
-        player.enableRate = true
-        player.rate = rate
-        player.delegate = self
-        player.prepareToPlay()
-        self.player = player
-        duration = player.duration
+    /// Session setup and file opening run off the main thread, so expanding a row stays smooth.
+    func load(_ url: URL) async throws {
+        let rate = rate
+        let prepared: AVAudioPlayer = try await Task.detached(priority: .userInitiated) {
+            // Plays with the silent switch on and keeps going with the screen locked.
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+            try AVAudioSession.sharedInstance().setActive(true)
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.enableRate = true
+            player.rate = rate
+            player.prepareToPlay()
+            return player
+        }.value
+        prepared.delegate = self
+        player = prepared
+        duration = prepared.duration
+        time = 0
     }
 
     func toggle() {
@@ -38,7 +44,11 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         time = player.currentTime
     }
 
-    func stop() { player?.stop(); stopTimer(); playing = false }
+    func stop() {
+        player?.stop(); player = nil; stopTimer()
+        if playing { playing = false }
+        if time != 0 { time = 0 }
+    }
 
     private func startTimer() {
         timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
@@ -60,7 +70,7 @@ struct InlinePlayer: View {
     @State private var failure: String?
 
     var body: some View {
-        Group {
+        ZStack {
             if loading {
                 HStack(spacing: 10) { ProgressView(); Text("Preparing audio…").font(.subheadline).foregroundStyle(.secondary) }
                     .frame(maxWidth: .infinity, minHeight: 60)
@@ -100,10 +110,12 @@ struct InlinePlayer: View {
                 }
             }
         }
-        .padding(.top, 6)
+        // One height in every state, so the row grows once.
+        .frame(height: 96)
+        .padding(.top, 4)
         .task(id: item.id) {
             loading = true; failure = nil
-            do { try player.load(try await SyncEngine.shared.playableFile(for: item)); player.toggle() }
+            do { try await player.load(try await SyncEngine.shared.playableFile(for: item)); player.toggle() }
             catch { failure = error.localizedDescription }
             loading = false
         }

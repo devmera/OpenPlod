@@ -1352,3 +1352,19 @@
     transform: none;
   }
 }
+
+/* Multi-select: a checkbox over the source icon on hover, or on every row once something is picked. */
+.studio-recording { position: relative; }
+.studio-row-check { position: absolute; z-index: 1; left: 12px; top: 50%; display: grid; place-items: center; width: 34px; height: 34px; transform: translateY(-50%); cursor: pointer; opacity: 0; }
+.studio-row-check input { width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer; }
+.studio-recording:hover .studio-row-check, .studio-row-check:focus-within, .picking .studio-row-check { opacity: 1; }
+.studio-recording:hover .studio-source-icon, .studio-recording:has(.studio-row-check:focus-within) .studio-source-icon, .picking .studio-source-icon { opacity: 0; }
+.studio-grid .studio-row-check { top: 12px; transform: none; }
+.studio-recording.picked { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+.bulk-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 12px; border: 1px solid var(--input); border-radius: 8px; background: var(--card); padding: 8px 8px 8px 16px; }
+.bulk-count { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; }
+.bulk-count svg { width: 15px; height: 15px; }
+.bulk-link { color: var(--primary); font-size: 13px; }
+.bulk-link:hover { text-decoration: underline; }
+.bulk-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.bulk-buttons .danger { color: var(--destructive); }

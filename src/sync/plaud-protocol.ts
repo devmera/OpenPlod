@@ -1,5 +1,5 @@
 // Interoperability framing verified against APK builders/parsers; no device writes here.
-export const PLAUD_COMMAND = { handshake: 1, sessions: 26, download: 28, tail: 29,
+export const PLAUD_COMMAND = { handshake: 1, depair: 5, sessions: 26, download: 28, tail: 29,
   signature: 0xfe10, signatureAccepted: 0xfe11, publicKey: 0xfe12 } as const;
 
 export function parseNoteProAdvertisement(data: Uint8Array) {
@@ -35,6 +35,22 @@ export function buildHandshake(bindingToken: string, protocolVersion: number): B
   // APK transport O() returns zero; the optional third field is NOT the firmware version.
   const options = protocolVersion >= 3 ? [2, 0, 0] : [2, 0];
   return command(PLAUD_COMMAND.handshake, Buffer.concat([Buffer.from(options), token]));
+}
+
+/**
+ * Unlink (depair) with recordings kept: `01 05 00 00`. The official SDK sends this
+ * from its "unbind" action (`b1(false)`, `depairDevice`); a clear flag of 1
+ * (`depairDeviceClearStorage`) also deletes recordings and is deliberately not built.
+ */
+export function buildUnlinkRequest(): Buffer {
+  return command(PLAUD_COMMAND.depair, Buffer.from([0]));
+}
+
+/** Status of a depair reply `01 05 00 [status]`; a reply without the byte is success, as in the SDK. */
+export function parseUnlinkResponse(packet: Uint8Array): number | null {
+  const bytes = Buffer.from(packet);
+  if (bytes.length < 3 || bytes[0] !== 1 || bytes.readUInt16LE(1) !== PLAUD_COMMAND.depair) return null;
+  return bytes.length > 3 ? bytes[3]! : 0;
 }
 
 export function buildSessionRequest(options: { requestId: number; cursor: number; ascending?: boolean }): Buffer {

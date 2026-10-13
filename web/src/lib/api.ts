@@ -750,6 +750,13 @@ export const api = {
     return res.data
   },
 
+  /** Unlinks the recorder from this computer's key over Bluetooth; recordings stay on the recorder. */
+  unlinkPlaudRecorder: async (): Promise<{ unlinked: boolean; confirmed: boolean }> => {
+    const res = await fetchJSON<ApiEnvelope<{ unlinked: boolean; confirmed: boolean }>>('/plaud/identity/unlink', {
+      method: 'POST', signal: AbortSignal.timeout(150000),
+    })
+    return res.data
+  },
   clearPlaudIdentity: async (): Promise<{ removed: boolean }> => {
     const res = await fetchJSON<ApiEnvelope<{ removed: boolean }>>('/plaud/identity', { method: 'DELETE', signal: AbortSignal.timeout(20000) })
     return res.data

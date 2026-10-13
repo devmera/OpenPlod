@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
-import { PlaudDownload, PlaudSessionPages, listPlaudSessions, recordingHandshake } from './plaud-transfer';
+import { describe, expect, test } from 'bun:test';
+import { PlaudDownload, PlaudSessionPages, listPlaudSessions, recordingHandshake, unlinkRecorder } from './plaud-transfer';
 import { downloadPlaudSession } from './plaud-transfer';
 
 function page(request: number, total: number, offset: number, ids: number[]) {
@@ -82,4 +82,36 @@ test('recording handshake rejects access denial and implements serial-driven sec
   expect(writes.map(packet => packet[5])).toEqual([0, 1]);
   const rejected = Buffer.from(accepted); rejected[3] = 2;
   await expect(recordingHandshake({ write: async () => {}, packet: async () => rejected }, 'a'.repeat(32))).rejects.toThrow('rejected');
+});
+
+describe('unlinkRecorder', () => {
+  const connection = (replies: Array<Buffer | Error>) => {
+    const written: Buffer[] = [];
+    return {
+      written,
+      write: async (packet: Uint8Array) => { written.push(Buffer.from(packet)); },
+      packet: async () => {
+        const next = replies.shift();
+        if (!next) throw new Error('Timed out waiting for Plaud response');
+        if (next instanceof Error) throw next;
+        return next;
+      },
+    };
+  };
+
+  test('sends the keep-recordings depair and reads its status', async () => {
+    const link = connection([Buffer.from([1, 9, 0, 80]), Buffer.from([1, 5, 0, 0])]);
+    expect(await unlinkRecorder(link)).toEqual({ confirmed: true });
+    expect(link.written.map(packet => packet.toString('hex'))).toEqual(['01050000']);
+  });
+
+  test('a recorder that drops the connection after the request is unlinked, never retried', async () => {
+    const link = connection([new Error('Bluetooth disconnected')]);
+    expect(await unlinkRecorder(link)).toEqual({ confirmed: false });
+    expect(link.written).toHaveLength(1);
+  });
+
+  test('reports a refused unlink', async () => {
+    await expect(unlinkRecorder(connection([Buffer.from([1, 5, 0, 3])]))).rejects.toThrow(/refused to unlink \(status 3\)/);
+  });
 });

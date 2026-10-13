@@ -25,6 +25,7 @@
 .plaud-authorize-keys small { font-size: 11px; line-height: 1.5; color: var(--muted-foreground); }
 .plaud-authorize-import input { max-width: 100%; margin-top: 8px; font-size: 11px; }
 .plaud-authorize-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.plaud-authorize-confirm { margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
 .plaud-authorize-notice { color: var(--positive); }
 .plaud-authorize-error { color: var(--destructive); }
 .plaud-authorize-help { margin-top: 12px; font-size: 11px; color: var(--muted-foreground); }

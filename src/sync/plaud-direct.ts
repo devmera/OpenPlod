@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { PlaudConnection, type PlaudIdentity } from './plaud-connection';
 import { PlaudTransport } from './plaud-transport';
 import { decodePlaudAudio } from './plaud-audio';
-import { downloadPlaudSession, listPlaudSessions, recordingHandshake } from './plaud-transfer';
+import { downloadPlaudSession, listPlaudSessions, recordingHandshake, unlinkRecorder } from './plaud-transfer';
 import { fingerprintFile, importRecordingFile } from '../library/recording-library';
 import { openPlaudCheckpoint } from './plaud-checkpoint';
 import { bluetoothSupported, isBluetoothIdentifier, isDesktopPlatform } from './plaud-bridge';
@@ -100,6 +100,16 @@ export function bindFailure(message: string, keyRequested: boolean): PlaudBindEr
   return new PlaudBindError(keyRequested
     ? `The recorder asked for the new key but the connection did not finish (${message}). The key is kept on this computer; wake the recorder and authorize again to finish.`
     : message, keyRequested);
+}
+
+/**
+ * Unlinks the recorder from this computer's key, keeping its recordings, as the
+ * official app's Unlink does. Only a client holding the bound key can do this.
+ * Afterwards the recorder asks the next client for a key and does not record
+ * until one is bound.
+ */
+export async function unlinkDirectPlaud(): Promise<{ confirmed: boolean }> {
+  return withDevice(connection => unlinkRecorder(connection));
 }
 
 export async function readDirectPlaudRecordings() {

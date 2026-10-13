@@ -250,7 +250,7 @@ The desktop app shows the same report in the **This computer** panel on the Plau
 
 Audio travels directly from the device over Bluetooth. The verified extraction did **not** download audio from Plaud's cloud or transfer it through a phone. The adapter checks transfer framing, size, authenticated decryption, decoded Ogg integrity, and playable duration. It preserves device bytes and decoded audio alongside an M4A playback copy, then checks that the source session is still listed on the Plaud. The device's transfer-tail checksum is retained but its algorithm is not yet validated.
 
-The extraction command set excludes force-clear, ownership reset, and device-file deletion. The folder-import setting for deleting source files is separate from direct Bluetooth imports.
+The extraction command set excludes force-clear, ownership reset, and device-file deletion. The only command that changes the recorder is the owner's **Unlink** (see below), sent with recordings kept and only by a client holding the bound key. The folder-import setting for deleting source files is separate from direct Bluetooth imports.
 
 #### Device Authorization
 
@@ -275,6 +275,8 @@ This uses only the normal handshake. A recorder with no stored user key asks the
 The bind is confirmed before anything is saved. The new identity is written to `plaud-device.pending.json` first, so a recorder that stored the key during an interrupted connection can still be reached; authorizing again finishes the bind with the same key. A different identity that is being replaced, or a local identity that is removed, is moved to `plaud-device.previous.json` rather than deleted. **Back up `plaud-device.json` when it holds a local key**: it is the only copy, and while the recorder is bound to it the Plaud app cannot connect or unlink it.
 
 Each recording's file key is encrypted to the user key that was active when it was recorded. Import recordings before changing keys: files recorded under an earlier key can only be decrypted with that key (kept in `plaud-device.previous.json` when OpenPlod replaced it). Unlinking may also remove the recordings from the recorder, depending on the option chosen in the Plaud app.
+
+**Unlink this recorder** sends the same unlink the Plaud app sends from its Unbind screen when recordings are kept (opcode 5, clear flag 0; the erase variant is not implemented). It needs a connection authenticated with the bound key, so it cannot unlink someone else's recorder. It matters for local keys, because a recorder bound to one cannot be unlinked from the Plaud app. The recorder often disconnects instead of replying; as in the official SDK, that counts as done, and OpenPlod does not reconnect, which would bind the recorder to the same key again. The identity is then kept as `plaud-device.previous.json`. An unlinked recorder does not record until a client binds it.
 
 An identity created by another tool can be imported from the same panel. It is validated and replaces the current identity, which is kept as `plaud-device.previous.json`.
 

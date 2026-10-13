@@ -304,6 +304,17 @@ export async function knownSerialCredentials(serial: string): Promise<{ signatur
   return null;
 }
 
+/**
+ * Takes the identity out of use after the recorder was unlinked from it. It is
+ * kept as `plaud-device.previous.json`: recordings left on the recorder stay
+ * encrypted to this key.
+ */
+export async function retireStoredIdentity(): Promise<boolean> {
+  if (!existsSync(identityFilePath())) return false;
+  await rename(identityFilePath(), previousIdentityFilePath());
+  return true;
+}
+
 export async function readPendingIdentity(): Promise<ProvisionedIdentity | null> {
   try { return JSON.parse(await readFile(pendingIdentityFilePath(), 'utf8')) as ProvisionedIdentity; }
   catch { return null; }

@@ -15,7 +15,7 @@ import { saveGeneratedTranscript } from '../library/transcript-history';
 import { FolderWatcher } from '../sync/folder-watcher';
 import { scanDesktopPlaud } from '../sync/desktop-plaud';
 import {
-  PlaudBindError, bindDirectPlaudIdentity, cancelDirectPlaud, directPlaudConfigured, importDirectPlaudRecording, readDirectPlaudRecordings,
+  PlaudBindError, bindDirectPlaudIdentity, cancelDirectPlaud, unlinkDirectPlaud, directPlaudConfigured, importDirectPlaudRecording, readDirectPlaudRecordings,
 } from '../sync/plaud-direct';
 import { readDeviceCredentials } from '../sync/plaud-device-auth';
 import { isBluetoothIdentifier } from '../sync/plaud-bridge';
@@ -27,7 +27,7 @@ import {
 import {
   DEFAULT_PLAUD_DOMAIN, PLAUD_DOMAINS, PlaudIdentityProvisioner, clearPendingIdentity, clearStoredIdentity, deviceTypeForSerial,
   generateLocalKeyPair, identityFilePath, isPlaudDomain, knownSerialCredentials, parseDeviceIdentity, provisionWithDeveloperCredentials, readPendingIdentity, readStoredIdentity,
-  replaceStoredIdentity, writePendingIdentity, writeStoredIdentity, type KeySource, type ProvisionedIdentity,
+  replaceStoredIdentity, retireStoredIdentity, writePendingIdentity, writeStoredIdentity, type KeySource, type ProvisionedIdentity,
 } from '../sync/plaud-provision';
 
 const app = new Hono();
@@ -463,6 +463,17 @@ app.post('/identity/import', async c => {
       authorized: directPlaudConfigured(), serial: identity.serial, identifier: identity.identifier,
       deviceType: deviceTypeForSerial(identity.serial), keySource: identity.keySource, previousKept,
     }});
+  } catch (error) { return c.json({ success: false, error: authorizationError(error) }, 400); }
+});
+
+// Unlink the recorder from this computer's key (recordings stay on the recorder).
+// The owner's action from the Plaud app, needed here because a recorder bound to
+// a locally generated key cannot be unlinked by the Plaud app.
+app.post('/identity/unlink', async c => {
+  try {
+    const { confirmed } = await unlinkDirectPlaud();
+    await retireStoredIdentity();
+    return c.json({ success: true, data: { unlinked: true, confirmed } });
   } catch (error) { return c.json({ success: false, error: authorizationError(error) }, 400); }
 });
 

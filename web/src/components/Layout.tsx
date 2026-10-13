@@ -5,7 +5,6 @@ import {
   Bell,
   Bluetooth,
   ChevronRight,
-  FileText,
   FolderHeart,
   HardDrive,
   Home,
@@ -40,14 +39,13 @@ import { buildInfo, buildLabel } from "@/lib/build-info";
 
 const nav = [
   { to: "/", icon: FolderHeart, label: "Recordings" },
-  { to: "/transcripts", icon: FileText, label: "Transcripts" },
+  { to: "/notes", icon: NotebookPen, label: "Documents" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
 const desktopNav = [
   { to: "/", icon: Home, label: "Home" },
   { to: "/recordings", icon: FolderHeart, label: "Recordings" },
-  nav[1],
   { to: "/notes", icon: NotebookPen, label: "Documents" },
   { to: "/ai", icon: MessageSquare, label: "AI Chat" },
 ];

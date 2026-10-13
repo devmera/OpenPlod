@@ -178,7 +178,7 @@ export function NotesPage() {
     {notice && <div className="notes-message" role="status"><Check /><span>{notice}</span></div>}
     <div className="notes-columns">
       <header className="notes-heading"><div><h1>Documents</h1></div><div>
-        <IconButton asChild label="Open transcripts"><Link to="/transcripts"><FileText /></Link></IconButton>
+        <IconButton asChild label="Open recordings"><Link to="/recordings"><FileText /></Link></IconButton>
         <IconButton label="Import Markdown" disabled={busy} onClick={() => importRef.current?.click()}><Upload /></IconButton>
         <Button size="sm" disabled={busy} onClick={createNote}><FilePlus2 />New note</Button>
       </div></header>

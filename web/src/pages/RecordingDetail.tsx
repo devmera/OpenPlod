@@ -405,7 +405,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
     <div className="recording-page" style={{ "--recording-toolbar-height": `${toolbarHeight}px` } as React.CSSProperties}>
       {transcribeOpen && <TranscribeDialog recordingId={recording.id} title={recording.title} onClose={() => setTranscribeOpen(false)} onQueued={() => { setRecording(current => current ? { ...current, status: 'pending' } : current) }} />}
       <header className="recording-toolbar" ref={toolbar}>
-        <Link to={backPath} className="recording-back" aria-label={backPath === '/transcripts' ? 'Back to transcripts' : 'Back to library'}><ArrowLeft /></Link>
+        <Link to={backPath} className="recording-back" aria-label="Back to library"><ArrowLeft /></Link>
         <div className="recording-title-block">
           {editingMetadata ? (
             <input value={titleDraft} onChange={event => setTitleDraft(event.target.value)} className="recording-title-input" aria-label="Recording title" />

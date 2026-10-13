@@ -4,6 +4,7 @@ import { Layout } from '@/components/Layout'
 import { Loader2 } from "@/components/icons"
 import { RuntimeGate } from '@/components/RuntimeGate'
 import { SharedAudioRouter } from '@/components/SharedAudioRouter'
+import { ConfirmHost } from '@/components/ConfirmHost'
 
 const DevicesPage = lazy(() => import('@/pages/DevicesPage').then(module => ({ default: module.DevicesPage })))
 
@@ -30,6 +31,7 @@ export default function App() {
     <RuntimeGate>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <SharedAudioRouter />
+        <ConfirmHost />
         <Suspense fallback={<PageFallback />}>
           <Routes>
             <Route element={<Layout />}>

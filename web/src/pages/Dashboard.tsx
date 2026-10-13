@@ -52,6 +52,7 @@ import { useLibraryChanges } from "@/lib/library-changes";
 import { ProcessingChip } from '@/components/ProcessingState';
 import { useProcessingStages } from '@/lib/processing';
 import { BulkActions, type BulkAction, type BulkProgress } from '@/components/BulkActions'
+import { confirmAction } from '@/lib/confirm'
 
 export function Dashboard() {
   const [recordings, setRecordings] = useState<Recording[]>([]),
@@ -288,9 +289,10 @@ export function Dashboard() {
   };
   const purge = async (id: string) => {
     if (
-      !window.confirm(
+      !(await confirmAction(
         "Permanently delete this recording and its audio? This cannot be undone.",
-      )
+        { confirmLabel: "Delete permanently", destructive: true },
+      ))
     )
       return;
     try {

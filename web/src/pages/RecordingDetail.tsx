@@ -51,6 +51,7 @@ import { useLibraryChanges } from '@/lib/library-changes'
 import { formatDuration } from '@/lib/utils'
 import { exportDocument, exportOriginalAudio, recordingMarkdown, safeDocumentName as safeName } from '@/lib/document-export'
 import { deviceCommand, supportsPlaudDevice, vaultArguments } from '@/lib/plaud-device'
+import { confirmAction } from '@/lib/confirm'
 
 type BusyAction = 'transcribing' | 'summarizing' | 'saving' | 'forwarding' | null
 type DocumentMode = 'summary' | 'preview' | 'edit' | 'timestamps' | 'studio'
@@ -352,7 +353,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
   }
 
   const trashRecording = async () => {
-    if (!recording || !window.confirm('Move this recording to Trash for 30 days?')) return
+    if (!recording || !(await confirmAction('Move this recording to Trash for 30 days?', { confirmLabel: 'Move to Trash', destructive: true }))) return
     await api.trashRecording(recording.id)
     navigate('/')
   }

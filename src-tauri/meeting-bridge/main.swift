@@ -10,10 +10,13 @@
 //      headphones and keep the two sides distinguishable.
 //
 // Protocol: one JSON object per line.
-//   stdin  {"cmd":"start","path":"/abs/file.caf","label":"Zoom"} | {"cmd":"stop"}
+//   stdin  {"cmd":"start","path":"/abs/file.caf","label":"Zoom","bar":true} | {"cmd":"stop"}
 //   stdout {"event":"ready"} | {"event":"apps","apps":[{"id","name"}]}
 //          {"event":"started","path"} | {"event":"stopped","path","durationSeconds","reason"}
-//          {"event":"error","message"}
+//          {"event":"mark","path","seconds","note"} | {"event":"error","message"}
+//
+// While recording, an optional floating bar (see `RecordingBar`) shows a level
+// meter and offers Stop and "mark this moment"; marks become bookmarks.
 //
 // The recording is 16-bit PCM in a CAF container: unlike compressed CAF it stays
 // readable if the process dies mid-meeting (no packet table to finalise). The
@@ -193,10 +196,14 @@ final class MeetingRecorder {
     private var engine: AVAudioEngine?
     private var tap: SystemAudioTap?
     private(set) var framesWritten: Int64 = 0
+    /// Elapsed audio and the latest peak, read by the bar from the main thread.
+    private let statsLock = NSLock()
+    private var peak: Float = 0
 
     init(url: URL) { self.url = url }
 
-    var duration: Double { Double(framesWritten) / Self.sampleRate }
+    var duration: Double { statsLock.lock(); defer { statsLock.unlock() }; return Double(framesWritten) / Self.sampleRate }
+    var level: Float { statsLock.lock(); defer { statsLock.unlock() }; return peak }
 
     func start() throws {
         file = try AVAudioFile(forWriting: url, settings: [
@@ -258,13 +265,15 @@ final class MeetingRecorder {
         guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(n)),
               let channels = buffer.floatChannelData else { return }
         buffer.frameLength = AVAudioFrameCount(n)
+        var loudest: Float = 0
         for i in 0..<n {
             channels[0][i] = i < left.count ? left[i] : 0
             channels[1][i] = i < right.count ? right[i] : 0
+            loudest = max(loudest, abs(channels[0][i]), abs(channels[1][i]))
         }
         do {
             try file.write(from: buffer)
-            framesWritten += Int64(n)
+            statsLock.lock(); framesWritten += Int64(n); peak = loudest; statsLock.unlock()
         } catch {
             emit(["event": "error", "message": "Meeting audio could not be written: \(error.localizedDescription)"])
         }
@@ -437,16 +446,191 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 }
 
+// MARK: - Floating recording bar
+
+/// A borderless panel that can take keyboard focus for the note field without
+/// activating the helper or pulling focus from the call before that.
+final class BarPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
+/// Five bars driven by the recording's peak level, smoothed so it reads calmly.
+final class LevelMeter: NSView {
+    var level: CGFloat = 0 { didSet { needsDisplay = true } }
+    override var intrinsicContentSize: NSSize { NSSize(width: 22, height: 18) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let weights: [CGFloat] = [0.45, 0.8, 1, 0.7, 0.5]
+        let width: CGFloat = 2.5, gap = (bounds.width - width * 5) / 4
+        NSColor.labelColor.setFill()
+        for (index, weight) in weights.enumerated() {
+            let height = max(3, bounds.height * min(1, level * weight * 1.6))
+            let rect = NSRect(x: CGFloat(index) * (width + gap), y: (bounds.height - height) / 2, width: width, height: height)
+            NSBezierPath(roundedRect: rect, xRadius: width / 2, yRadius: width / 2).fill()
+        }
+    }
+}
+
+/// The floating bar shown while a meeting is recorded: OpenPlod mark (opens the
+/// app), level meter, Stop, and a pen that marks the current moment with an
+/// optional note. It floats on every Space, can be dragged and remembers where.
+final class RecordingBar: NSObject, NSPopoverDelegate {
+    var onStop: (() -> Void)?
+    var onMark: ((Double, String) -> Void)?
+    var elapsed: () -> Double = { 0 }
+    var level: () -> Float = { 0 }
+
+    private var panel: BarPanel?
+    private let meter = LevelMeter()
+    private var timer: Timer?
+    private var popover: NSPopover?
+    private var noteField: NSTextField?
+    private var pendingMark: Double?
+
+    func show() {
+        guard panel == nil else { return }
+        let size = NSSize(width: 44, height: 168)
+        let panel = BarPanel(contentRect: NSRect(origin: .zero, size: size),
+                             styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isMovableByWindowBackground = true
+        panel.hidesOnDeactivate = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+
+        let background = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+        background.material = .popover
+        background.blendingMode = .behindWindow
+        background.state = .active
+        background.wantsLayer = true
+        background.layer?.cornerRadius = 12
+        background.layer?.masksToBounds = true
+        panel.contentView = background
+
+        let separator = NSBox()
+        separator.boxType = .separator
+        let stop = button("stop.fill", "Stop recording", #selector(stopTapped))
+        stop.contentTintColor = .systemRed
+        let stack = NSStackView(views: [
+            accent(button("waveform.circle.fill", "Open OpenPlod", #selector(openTapped))), meter, separator,
+            stop, button("square.and.pencil", "Mark this moment", #selector(markTapped)),
+        ])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        background.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: background.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: background.centerYAnchor),
+            separator.widthAnchor.constraint(equalToConstant: 22),
+        ])
+
+        if !panel.setFrameUsingName("OpenPlodRecordingBar"), let screen = NSScreen.main {
+            let frame = screen.visibleFrame
+            panel.setFrameOrigin(NSPoint(x: frame.maxX - size.width - 24, y: frame.midY - size.height / 2))
+        }
+        panel.setFrameAutosaveName("OpenPlodRecordingBar")
+        panel.orderFrontRegardless()
+        self.panel = panel
+        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            // Rise fast, fall slowly; the recorder's peak updates four times a second.
+            let target = CGFloat(min(1, sqrt(self.level())))
+            self.meter.level = target > self.meter.level ? target : self.meter.level * 0.85
+            self.panel?.contentView?.toolTip = "Recording · \(Self.clock(self.elapsed()))"
+        }
+    }
+
+    func hide() {
+        timer?.invalidate()
+        timer = nil
+        popover?.close()
+        panel?.orderOut(nil)
+        panel = nil
+    }
+
+    private func accent(_ button: NSButton) -> NSButton {
+        button.contentTintColor = .controlAccentColor
+        return button
+    }
+
+    private func button(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
+            .withSymbolConfiguration(.init(pointSize: 17, weight: .medium)) ?? NSImage()
+        let button = NSButton(image: image, target: self, action: action)
+        button.isBordered = false
+        button.toolTip = label
+        button.setAccessibilityLabel(label)
+        return button
+    }
+
+    @objc private func openTapped() {
+        // The helper lives inside OpenPlod.app; opening the bundle brings its window forward.
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    @objc private func stopTapped() { onStop?() }
+
+    @objc private func markTapped(_ sender: NSButton) {
+        if popover != nil { return }
+        pendingMark = elapsed()
+        let field = NSTextField(frame: NSRect(x: 10, y: 10, width: 220, height: 24))
+        field.placeholderString = "Note for \(Self.clock(pendingMark ?? 0)) (optional)"
+        field.target = self
+        field.action = #selector(noteEntered)
+        let content = NSViewController()
+        content.view = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 44))
+        content.view.addSubview(field)
+        let popover = NSPopover()
+        popover.contentViewController = content
+        popover.behavior = .transient
+        popover.delegate = self
+        self.popover = popover
+        noteField = field
+        panel?.makeKey()
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minX)
+        panel?.makeFirstResponder(field)
+    }
+
+    @objc private func noteEntered() { popover?.performClose(nil) }
+
+    // Closing the popover by any route saves the mark, with whatever note was typed.
+    func popoverDidClose(_ notification: Notification) {
+        if let seconds = pendingMark { onMark?(seconds, noteField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") }
+        pendingMark = nil
+        noteField = nil
+        popover = nil
+    }
+
+    static func clock(_ seconds: Double) -> String {
+        let total = Int(seconds)
+        return total >= 3600 ? String(format: "%d:%02d:%02d", total / 3600, total / 60 % 60, total % 60)
+            : String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
 // MARK: - Main loop (all state lives on the main queue)
 
 final class Bridge {
     private var recorder: MeetingRecorder?
     private var lastApps: [String]?
     private let notifier = Notifier()
+    private let bar = RecordingBar()
     private var signalSources: [DispatchSourceSignal] = []
 
     func run() {
         notifier.onStop = { [weak self] in self?.stop(reason: "notification") }
+        bar.onStop = { [weak self] in self?.stop(reason: "bar") }
+        bar.onMark = { [weak self] seconds, note in
+            guard let path = self?.recorder?.url.path else { return }
+            emit(["event": "mark", "path": path, "seconds": seconds, "note": note])
+        }
+        bar.elapsed = { [weak self] in self?.recorder?.duration ?? 0 }
+        bar.level = { [weak self] in self?.recorder?.level ?? 0 }
         notifier.register()
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
@@ -495,7 +679,7 @@ final class Bridge {
             guard let path = request["path"] as? String, path.hasPrefix("/"), path.hasSuffix(".caf") else {
                 emit(["event": "error", "message": "Invalid recording path."]); return
             }
-            start(path: path, label: request["label"] as? String ?? "meeting")
+            start(path: path, label: request["label"] as? String ?? "meeting", showBar: request["bar"] as? Bool ?? true)
         case "stop":
             stop(reason: "command")
         case "apps":
@@ -506,7 +690,7 @@ final class Bridge {
         }
     }
 
-    private func start(path: String, label: String) {
+    private func start(path: String, label: String, showBar: Bool) {
         guard recorder == nil else { emit(["event": "error", "message": "A meeting is already being recorded."]); return }
         AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
             DispatchQueue.main.async { [weak self] in
@@ -520,6 +704,7 @@ final class Bridge {
                     try recorder.start()
                     self.recorder = recorder
                     emit(["event": "started", "path": path])
+                    if showBar { self.bar.show() }
                     self.notifier.post(title: "Recording \(label)",
                                        body: "Saved to your OpenPlod vault. Stops when the call ends.")
                 } catch {
@@ -534,6 +719,7 @@ final class Bridge {
         guard let recorder else { return }
         recorder.stop()
         self.recorder = nil
+        bar.hide()
         notifier.clear()
         emit(["event": "stopped", "path": recorder.url.path, "durationSeconds": recorder.duration, "reason": reason])
     }
@@ -542,8 +728,35 @@ final class Bridge {
 setvbuf(stdout, nil, _IOLBF, 0)
 signal(SIGPIPE, SIG_IGN)
 let bridge = Bridge()
-bridge.run()
+let preview = RecordingBar()
+if CommandLine.arguments.contains("--preview-bar") {
+    // Development aid: the bar with a simulated meter, no recording; prints its frame.
+    let started = Date()
+    preview.elapsed = { Date().timeIntervalSince(started) }
+    preview.level = { Float(abs(sin(Date().timeIntervalSince(started) * 3))) * 0.6 }
+    preview.onMark = { seconds, note in emit(["event": "mark", "seconds": seconds, "note": note]) }
+    preview.onStop = { exit(0) }
+    DispatchQueue.main.async {
+        preview.show()
+        if let frame = NSApp.windows.first(where: { $0 is BarPanel })?.frame, let screen = NSScreen.main {
+            emit(["event": "preview", "x": frame.minX, "y": screen.frame.height - frame.maxY, "width": frame.width, "height": frame.height])
+        }
+        // OPENPLOD_BAR_SNAPSHOT=/path.png renders the bar to an image after a second.
+        if let output = ProcessInfo.processInfo.environment["OPENPLOD_BAR_SNAPSHOT"],
+           let view = NSApp.windows.first(where: { $0 is BarPanel })?.contentView {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+                view.cacheDisplay(in: view.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: output))
+                emit(["event": "snapshot", "path": output])
+            }
+        }
+    }
+} else {
+    bridge.run()
+}
 // NSApplication (not just a run loop) so workspace and notification callbacks are delivered.
 let application = NSApplication.shared
-application.setActivationPolicy(.prohibited)
+// Accessory: no Dock icon or menu, but allowed to show the floating bar.
+application.setActivationPolicy(.accessory)
 application.run()

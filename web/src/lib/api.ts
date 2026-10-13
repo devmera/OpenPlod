@@ -370,6 +370,8 @@ export interface MeetingStatus {
   /** Why the recorder is unavailable, when it is. */
   reason: string | null
   autoRecord: boolean
+  /** Show the floating bar (meter, Stop, mark) while recording. */
+  floatingBar: boolean
   enabledApps: string[]
   /** Every supported app; `active` while it is capturing the microphone. */
   apps: (MeetingApp & { enabled: boolean; active: boolean })[]
@@ -927,7 +929,7 @@ export const api = {
 
   getMeetings: async (signal?: AbortSignal): Promise<MeetingStatus> =>
     (await fetchJSON<ApiEnvelope<MeetingStatus>>('/meetings', { signal })).data,
-  updateMeetingSettings: async (input: { autoRecord?: boolean; enabledApps?: string[] }): Promise<MeetingStatus> =>
+  updateMeetingSettings: async (input: { autoRecord?: boolean; floatingBar?: boolean; enabledApps?: string[] }): Promise<MeetingStatus> =>
     (await fetchJSON<ApiEnvelope<MeetingStatus>>('/meetings/settings', { method: 'PUT', body: JSON.stringify(input) })).data,
   startMeeting: async (): Promise<MeetingStatus> =>
     (await fetchJSON<ApiEnvelope<MeetingStatus>>('/meetings/start', { method: 'POST' })).data,

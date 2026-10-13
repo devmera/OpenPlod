@@ -3,6 +3,7 @@ import { describeExport, obsidianApi, type ObsidianSettings, type ObsidianStatus
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Save, RefreshCw, Loader2 } from '@/components/icons'
+import { confirmAction } from '@/lib/confirm'
 
 const selectClass = 'h-10 w-full min-w-0 rounded-md border bg-background px-3 text-sm'
 
@@ -44,7 +45,7 @@ export function ObsidianPanel() {
       <p className="font-medium">Notes OpenPlod did not overwrite</p>
       <ul className="divide-y rounded-md border">{status.conflicts.map(item => <li key={item.recordingId} className="flex items-center justify-between gap-3 px-3 py-2">
         <span className="min-w-0"><span className="block truncate">{item.path}</span><span className="text-muted-foreground">{item.reason}</span></span>
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => { if (window.confirm(`Replace the OpenPlod part of ${item.path}? Your text outside the OpenPlod markers is kept.`)) void action(async () => describeExport(await obsidianApi.exportRecording(item.recordingId, true))) }}>Replace</Button>
+        <Button variant="ghost" size="sm" disabled={busy} onClick={() => { void confirmAction(`Replace the OpenPlod part of ${item.path}? Your text outside the OpenPlod markers is kept.`, { confirmLabel: 'Replace' }).then(ok => { if (ok) void action(async () => describeExport(await obsidianApi.exportRecording(item.recordingId, true))) }) }}>Replace</Button>
       </li>)}</ul>
     </div>}
   </section>

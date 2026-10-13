@@ -304,6 +304,18 @@ export async function knownSerialCredentials(serial: string): Promise<{ signatur
   return null;
 }
 
+/**
+ * Private keys of identities this computer replaced for `serial`. A recording's
+ * file key is encrypted to the user key in force when it was recorded, so
+ * recordings made before a key change are still readable with the old key.
+ */
+export async function previousPrivateKeys(serial: string): Promise<string[]> {
+  try {
+    const previous = JSON.parse(await readFile(previousIdentityFilePath(), 'utf8')) as Partial<PlaudDeviceIdentity>;
+    return previous.serial === serial && typeof previous.privateKey === 'string' && previous.privateKey ? [previous.privateKey] : [];
+  } catch { return []; }
+}
+
 export async function readPendingIdentity(): Promise<ProvisionedIdentity | null> {
   try { return JSON.parse(await readFile(pendingIdentityFilePath(), 'utf8')) as ProvisionedIdentity; }
   catch { return null; }

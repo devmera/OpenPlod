@@ -6,11 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   BINDING_TOKEN_PATTERN, PlaudIdentityProvisioner, clearPendingIdentity, clearStoredIdentity, deviceTypeForSerial,
-  generateLocalKeyPair, identityFilePath, knownSerialCredentials, normalizeAccessToken, parseAccessToken, parseDeviceIdentity,
+  generateLocalKeyPair, identityFilePath, knownSerialCredentials, previousPrivateKeys, normalizeAccessToken, parseAccessToken, parseDeviceIdentity,
   pendingIdentityFilePath, previousIdentityFilePath, provisionWithDeveloperCredentials, readPendingIdentity,
   readStoredIdentity, replaceStoredIdentity, writePendingIdentity, writeStoredIdentity,
 } from './plaud-provision';
-import { bindFailure } from './plaud-direct';
+import { bindFailure, unwrapFileKey } from './plaud-direct';
 
 const SERIAL = '8810B50327175322';
 const MAC = 'C4:96:9D:11:27:21';
@@ -285,6 +285,27 @@ describe('locally generated keys', () => {
     expect(await readStoredIdentity()).toBeNull();
     await clearPendingIdentity();
     expect(await readPendingIdentity()).toBeNull();
+  });
+
+  test('unwraps file keys with the current key, then keys this computer used before', async () => {
+    await withTemporaryIdentity();
+    expect(await previousPrivateKeys(SERIAL)).toEqual([]);
+    const old = identityFor(generateLocalKeyPair()), current = identityFor(generateLocalKeyPair());
+    await replaceStoredIdentity(old); await replaceStoredIdentity(current);
+    expect(await previousPrivateKeys(SERIAL)).toEqual([old.privateKey]);
+    expect(await previousPrivateKeys('8810000000000000')).toEqual([]);
+
+    const tried: string[] = [];
+    const decrypt = async (key: string) => {
+      tried.push(key);
+      if (key !== old.privateKey) throw new Error('Bluetooth rsa-decrypt failed');
+      return { data: Buffer.from('file-key').toString('base64') };
+    };
+    const keys = [current.privateKey, ...await previousPrivateKeys(SERIAL)];
+    expect((await unwrapFileKey(Buffer.alloc(256), keys, decrypt)).toString()).toBe('file-key');
+    expect(tried).toEqual([current.privateKey, old.privateKey]);
+    await expect(unwrapFileKey(Buffer.alloc(256), [current.privateKey], decrypt)).rejects.toThrow(/cannot be decrypted here/);
+    await expect(unwrapFileKey(Buffer.alloc(256), keys, async () => { throw new Error('Bluetooth disconnected'); })).rejects.toThrow('Bluetooth disconnected');
   });
 
   test('explains a recorder that is still linked to another key', () => {

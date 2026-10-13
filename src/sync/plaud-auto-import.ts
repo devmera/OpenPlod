@@ -4,6 +4,8 @@ import { directPlaudConfigured, importDirectPlaudRecording, readDirectPlaudRecor
 export class PlaudAutoImport {
   private running = false;
   private previous = new Map<string, number>();
+  /** Recordings that cannot be decrypted with any key held here; not downloaded again this session. */
+  private unreadable = new Set<string>();
   private lastChecked: string | null = null;
   private error: string | null = null;
   private failures = 0;
@@ -33,12 +35,21 @@ export class PlaudAutoImport {
         if (!this.enabled()) break;
         // Wait for an unchanged second observation so in-progress recordings are not imported.
         if (session.size <= 512 || this.previous.get(source) !== session.size) continue;
-        if (existing.has(source)) continue;
-        const imported = await this.adapter.import(session.sessionId);
+        if (existing.has(source) || this.unreadable.has(source)) continue;
+        let imported: Awaited<ReturnType<typeof this.adapter.import>>;
+        try { imported = await this.adapter.import(session.sessionId); }
+        catch (error) {
+          // One recording made under another key must not block the ones after it.
+          if (!/cannot be decrypted here/.test(error instanceof Error ? error.message : '')) throw error;
+          this.unreadable.add(source);
+          continue;
+        }
         if (imported.added || imported.recording.sourceRecordingId === source) existing.add(source);
         if (imported.added) this.database.query('INSERT INTO plaud_import_events(recording_id,created_at) VALUES(?,?)').run(imported.recording.id, new Date().toISOString());
       }
-      this.previous = observed; this.failures = 0; this.error = null; this.retryAt = 0;
+      this.previous = observed; this.failures = 0; this.retryAt = 0;
+      const skipped = result.sessions.filter(session => this.unreadable.has(`${result.serial}:${session.sessionId}`)).length;
+      this.error = skipped ? `${skipped} recording${skipped === 1 ? ' was' : 's were'} made under a key this computer does not hold and ${skipped === 1 ? 'was' : 'were'} skipped.` : null;
       this.database.query('DELETE FROM plaud_import_events WHERE id NOT IN (SELECT id FROM plaud_import_events ORDER BY id DESC LIMIT 100)').run();
     } catch (e) {
       this.error = e instanceof Error ? e.message : 'Plaud automatic import unavailable.';

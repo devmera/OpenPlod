@@ -274,7 +274,7 @@ This uses only the normal handshake. A recorder with no stored user key asks the
 
 The bind is confirmed before anything is saved. The new identity is written to `plaud-device.pending.json` first, so a recorder that stored the key during an interrupted connection can still be reached; authorizing again finishes the bind with the same key. A different identity that is being replaced, or a local identity that is removed, is moved to `plaud-device.previous.json` rather than deleted. **Back up `plaud-device.json` when it holds a local key**: it is the only copy, and while the recorder is bound to it the Plaud app cannot connect or unlink it.
 
-Each recording's file key is encrypted to the user key that was active when it was recorded. Import recordings before changing keys: files recorded under an earlier key can only be decrypted with that key (kept in `plaud-device.previous.json` when OpenPlod replaced it). Unlinking may also remove the recordings from the recorder, depending on the option chosen in the Plaud app.
+Each recording's file key is encrypted to the user key that was active when it was recorded. Recordings made under the key OpenPlod replaced are still imported: when the current key cannot unwrap a recording's file key, the key kept in `plaud-device.previous.json` is tried. Recordings made under a key this computer never held are skipped, and automatic import continues with the rest. Unlinking may also remove the recordings from the recorder, depending on the option chosen in the Plaud app.
 
 An identity created by another tool can be imported from the same panel. It is validated and replaces the current identity, which is kept as `plaud-device.previous.json`.
 

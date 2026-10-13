@@ -19,7 +19,7 @@ const reply = (quote = 'Keep the original audio.', sourceId = 'S1') => Response.
 const create = (fetcher: (url: unknown, options?: RequestInit) => Promise<Response>, key = 'test-only-key') => new RecordingAi(store, fetcher as typeof fetch, () => key);
 test('selected context only, real request contract, citations and idempotent persistence', async () => {
   let calls = 0;
-  const ai = create(async (url, options) => { calls++; expect(url).toBe('https://api.mistral.ai/v1/chat/completions'); const body = JSON.parse(String(options?.body)); const context = JSON.parse(body.messages[1].content); expect(context.sources).toHaveLength(1); expect(context.sources[0].recordingId).toBe(recordingId); return reply(); });
+  const ai = create(async (url, options) => { calls++; expect(url).toBe('https://api.mistral.ai/v1/chat/completions'); const body = JSON.parse(String(options?.body)); const context = JSON.parse(body.messages[1].content); expect(context.sources).toEqual([{ recording: 'Test recording', sources: [{ id: 'S1', start: 2, text: 'Keep the original audio.' }] }]); return reply(); });
   const request = input(), steps: string[] = [];
   const answer = await ai.ask(request, async s => { steps.push(s); });
   expect(steps).toEqual(['context', 'mistral', 'citations', 'saved']); expect(answer.sources[0]!.start).toBe(2);
@@ -41,8 +41,8 @@ test('partial timestamps do not silently omit transcript text, and follow-ups in
   db.query('UPDATE transcripts SET full_text=?').run('Keep the original audio. Extra unsegmented text.');
   const ai = create(async (_url, options) => {
     const context = JSON.parse(JSON.parse(String(options?.body)).messages[1].content);
-    expect(context.sources[0].text).toContain('Extra unsegmented text.');
-    expect(context.sources[0].start).toBeNull();
+    expect(context.sources[0].sources[0].text).toContain('Extra unsegmented text.');
+    expect(context.sources[0].sources[0].start).toBeNull();
     if (context.conversation.length) expect(context.conversation[0].answer).toBe('Keep the original audio. [S1]');
     return reply();
   });
@@ -69,4 +69,16 @@ test('provider failure exposes no response body and SSE correlates progress/resu
   const request = input(); const app = createRecordingAiApi(create(async () => reply()));
   const response = await app.request('/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) });
   const stream = await response.text(); expect(stream).toContain('event: progress'); expect(stream).toContain('event: result'); expect(stream).toContain(request.id); expect(stream).not.toContain('test-only-key');
+});
+
+test('a long segment-timed meeting fits: titles, IDs and hashes are not repeated per passage', async () => {
+  const title = `10-06 Meeting: ${'Migration Strategy, Envoy Proxy Rollout, DNS Routing '.repeat(2)}.ogg`;
+  const segments = Array.from({ length: 400 }, (_, index) => ({ start: index * 7, end: index * 7 + 6, text: `Passage ${index} about the migration plan and the next steps.` }));
+  db.query('UPDATE recordings SET original_filename = ?').run(title);
+  db.query('UPDATE transcripts SET full_text = ?, segments = ?').run(segments.map(segment => segment.text).join(' '), JSON.stringify(segments));
+  let payload = '';
+  const ai = create(async (_url, options) => { payload = JSON.parse(String(options?.body)).messages[1].content; return reply('Passage 0 about the migration plan and the next steps.'); });
+  await ai.ask(input(), async () => {});
+  expect(payload.split(title).length - 1).toBe(1);
+  expect(payload).not.toContain(recordingId);
 });

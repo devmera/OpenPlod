@@ -18,19 +18,34 @@ final class SyncEngine: ObservableObject {
     @Published private(set) var summary: String?
     @Published private(set) var lastSync: Date? = UserDefaults.standard.object(forKey: "lastSync") as? Date
 
-    /// After a sync, the recorder keeps advertising for a while; don't connect again right away.
-    private let cooldown: TimeInterval = 180
+    /// Guards against back-to-back syncs from repeated triggers; short, because iOS reports a
+    /// continuously advertising recorder only once and a dropped report is not repeated.
+    private let cooldown: TimeInterval = 45
     private var lastAttempt: Date?
     private let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appending(path: "pending", directoryHint: .isDirectory)
 
     // MARK: Hands-free sync
 
     /// The linked recorder was heard advertising: sync if set up and not done very recently.
-    func recorderHeard() {
+    func recorderHeard() { trigger("Recorder heard") }
+
+    /// The app came to the front: catch up on anything recorded since the last sync.
+    func appOpened() { trigger("App opened") }
+
+    /// iOS background refresh: a periodic chance to sync while the app is not in use.
+    func backgroundRefresh() async {
+        guard !running, let key = KeyStore.load(), let destination = Destination.load() else { return }
+        Activity.shared.record("Background refresh; syncing")
+        let uploaded = await sync(key: key, destination: destination)
+        Activity.shared.record(summary ?? "Sync finished")
+        if uploaded > 0 { notify(uploaded) }
+    }
+
+    private func trigger(_ reason: String) {
         let background = UIApplication.shared.applicationState != .active
         guard !running, let key = KeyStore.load(), let destination = Destination.load() else { return }
         if let lastAttempt, Date().timeIntervalSince(lastAttempt) < cooldown { return }
-        Activity.shared.record("Recorder heard\(background ? " in the background" : ""); syncing")
+        Activity.shared.record("\(reason)\(background ? " in the background" : ""); syncing")
         let task = UIApplication.shared.beginBackgroundTask(withName: "Sync recordings")
         Task {
             let uploaded = await sync(key: key, destination: destination)

@@ -13,9 +13,9 @@ export const TRASH_RETENTION_DAYS = 30;
 export class RecordingImportConflict extends Error {}
 
 export type RecordingProvenance = {
-  sourceProvider: 'plaud' | 'opennotes' | 'upload';
+  sourceProvider: 'plaud' | 'opennotes' | 'upload' | 'meeting';
   sourceRecordingId?: string | null;
-  sourceTransport: 'export' | 'folder' | 'mobile' | 'upload' | 'ble' | 'cloud';
+  sourceTransport: 'export' | 'folder' | 'mobile' | 'upload' | 'ble' | 'cloud' | 'capture';
   recordedAt?: string | null;
 };
 

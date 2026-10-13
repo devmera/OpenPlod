@@ -123,6 +123,15 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .sidebar-actions { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border); padding: 12px; }
 .vault-state { display: flex; align-items: center; gap: 7px; padding: 10px 12px 4px; color: var(--muted-foreground); font-size: 11px; }
 .vault-state svg { width: 14px; height: 14px; }
+.meeting-indicator { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; border: 1px solid color-mix(in srgb, #ef4444 35%, var(--border)); border-radius: 10px; background: color-mix(in srgb, #ef4444 8%, transparent); padding: 8px 8px 8px 12px; font-size: 12px; }
+.meeting-indicator-dot { width: 8px; height: 8px; flex-shrink: 0; border-radius: 999px; background: #ef4444; animation: meeting-pulse 1.6s ease-in-out infinite; }
+.meeting-indicator a { display: flex; min-width: 0; flex: 1; flex-direction: column; font-weight: 500; }
+.meeting-indicator small { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.meeting-indicator button { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 7px; color: var(--foreground); }
+.meeting-indicator button:hover { background: color-mix(in srgb, #ef4444 15%, transparent); }
+.meeting-indicator button svg { width: 12px; height: 12px; }
+@keyframes meeting-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .meeting-indicator-dot { animation: none; } }
 
 .brand { display: inline-flex; min-width: 0; align-items: center; gap: 10px; }
 .brand-mark { width: 30px; height: 30px; flex-shrink: 0; }

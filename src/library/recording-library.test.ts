@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
@@ -15,7 +15,7 @@ process.env.OPENPLOD_PAIRING_TOKEN = 'test-pairing-token';
 
 const { db, sqlite } = await import('../db/client');
 const { initializeDatabase } = await import('../db/setup');
-const { recordings, transcripts, transcriptVersions } = await import('../db/schema');
+const { recordings, transcripts, transcriptVersions, userSettings } = await import('../db/schema');
 const {
   importRecordingFile,
   purgeExpiredTrash,
@@ -28,6 +28,7 @@ const { default: recordingsApi } = await import('../api/recordings');
 const { default: transcriptsApi } = await import('../api/transcripts');
 const { saveGeneratedTranscript } = await import('./transcript-history');
 const { FolderWatcher } = await import('../sync/folder-watcher');
+const { finalizeMeeting } = await import('../meetings/meeting-recorder');
 
 beforeAll(() => initializeDatabase());
 
@@ -209,6 +210,35 @@ describe('recording library', () => {
     );
     expect(confirmed.status).toBe(200);
     expect(await Bun.file(imported.recording.filePath).exists()).toBe(false);
+  });
+});
+
+describe('meeting capture', () => {
+  // Uses the macOS audio tools the meeting helper relies on; no other platform records meetings.
+  test.skipIf(process.platform !== 'darwin')('converts a finished capture to m4a, imports it as a meeting and removes staging files', async () => {
+    await db.insert(userSettings).values({ key: 'autoTranscribe', value: 'false' })
+      .onConflictDoUpdate({ target: userSettings.key, set: { value: 'false' } });
+    const staging = join(testRoot, 'meeting-staging');
+    mkdirSync(staging, { recursive: true });
+    const caf = join(staging, '1760356920000-zoom.caf');
+    // The helper's format: 16-bit stereo PCM at 48 kHz in CAF.
+    expect(Bun.spawnSync(['/usr/bin/afconvert', '-f', 'caff', '-d', 'LEI16@48000', '-c', '2', '/System/Library/Sounds/Glass.aiff', caf]).exitCode).toBe(0);
+
+    const startedAt = new Date(1760356920000);
+    const result = await finalizeMeeting({ path: caf, app: { id: 'zoom', name: 'Zoom' }, startedAt, durationSeconds: 4 });
+
+    const [row] = await db.select().from(recordings).where(eq(recordings.id, result.recordingId));
+    expect(row).toMatchObject({
+      sourceProvider: 'meeting', sourceTransport: 'capture', recordingType: 'meeting',
+      recordedAt: startedAt.toISOString(), tags: ['meeting'], durationSeconds: 4, originalFilename: `${result.title}.m4a`,
+    });
+    expect(row.filePath.endsWith('.m4a')).toBe(true);
+    expect(existsSync(row.filePath)).toBe(true);
+    expect(existsSync(caf)).toBe(false);
+    expect(existsSync(caf.replace(/\.caf$/, '.m4a'))).toBe(false);
+    const info = Bun.spawnSync(['/usr/bin/afinfo', row.filePath]).stdout.toString();
+    expect(info).toContain('aac');
+    expect(info).toContain('2 ch');
   });
 });
 

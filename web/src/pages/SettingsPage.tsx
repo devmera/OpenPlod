@@ -8,6 +8,7 @@ import { api, type Settings } from '@/lib/api'
 import { getRuntime } from '@/lib/runtime'
 import { buildInfo, buildLabel } from '@/lib/build-info'
 import { AiSettingsPanel } from '@/components/AiSettingsPanel'
+import { MeetingRecorderPanel } from '@/components/MeetingRecorderPanel'
 
 function Toggle({ checked, onChange, label, description }: { checked: boolean; onChange: (v: boolean) => void; label: string; description: string }) {
   return (
@@ -33,11 +34,13 @@ function Toggle({ checked, onChange, label, description }: { checked: boolean; o
 export function SettingsPage() {
   const { hash } = useLocation()
   const pairingSection = useRef<HTMLDetailsElement>(null)
+  const meetingsSection = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (hash === '#pairing' && pairingSection.current) {
       pairingSection.current.open = true
       pairingSection.current.scrollIntoView({ block: 'start' })
     }
+    if (hash === '#meetings') meetingsSection.current?.scrollIntoView({ block: 'start' })
   }, [hash])
   const runtime = getRuntime()
   const [settings, setSettings] = useState<Settings>({
@@ -121,6 +124,8 @@ export function SettingsPage() {
       </details>
 
       <AiSettingsPanel />
+
+      <div id="meetings" ref={meetingsSection}><MeetingRecorderPanel /></div>
 
       {/* Sync */}
       <Card>

@@ -30,6 +30,8 @@ import { saveGeneratedTranscript } from './library/transcript-history';
 import { forwardRecordingWithRetry } from './library/forwarding';
 import { createAiSettingsApi } from './api/ai-settings';
 import { createJobsApi } from './api/jobs';
+import { createMeetingsApi } from './api/meetings';
+import { MeetingRecorder, finalizeMeeting, meetingStagingDirectory, spawnMeetingBridge } from './meetings/meeting-recorder';
 import { aiConfigSchema, readAiConfig, readSettings, assertPrivacy } from './ai/config';
 import packageInfo from '../package.json';
 
@@ -168,6 +170,8 @@ app.route('/api/v1/jobs', createJobsApi(jobQueue, sqlite));
 app.route('/api/v1', createOrganizerApi(organizer));
 app.route('/api/ai', createRecordingAiApi(new RecordingAi(organizer)));
 app.route('/api/ai-settings', createAiSettingsApi(sqlite));
+const meetings = new MeetingRecorder({ database: sqlite, spawnBridge: spawnMeetingBridge, finalize: finalizeMeeting, stagingDirectory: meetingStagingDirectory });
+app.route('/api/meetings', createMeetingsApi(meetings));
 
 // Settings
 app.get('/api/settings', async (c) => {
@@ -272,6 +276,12 @@ async function startFolderSync() {
 
 void startFolderSync().catch(error => console.error('[Startup] Folder sync failed:', error));
 setInterval(() => { void automaticPlaud.tick(); }, 60000).unref();
+// Meeting detection only runs on a Mac with the bundled helper; elsewhere it reports unavailable.
+if (process.platform === 'darwin') {
+  meetings.start();
+  setInterval(() => meetings.tick(), 2000).unref();
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => { meetings.shutdown(); setTimeout(() => process.exit(0), 1500); });
+}
 // 30-day Trash retention must hold for a long-running server too, not only at startup.
 function purgeTrash() {
   try { organizer.purgeExpired(); } catch (error) { console.error('[Retention] Note trash purge failed:', error); }

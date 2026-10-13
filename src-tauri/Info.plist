@@ -8,5 +8,7 @@
   <string>OpenPlod uses Bluetooth to confirm that your Plaud recorder is nearby.</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>OpenPlod records audio from your microphone and keeps it in your local recording vault.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>OpenPlod records the other participants of your meetings and keeps the audio in your local recording vault.</string>
 </dict>
 </plist>

@@ -1,6 +1,7 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { arch, platform } from 'node:os'
 import { resolve } from 'node:path'
+import { buildMeetingBridge } from './build-meeting-bridge'
 
 const hostTriples: Record<string, Record<string, string>> = {
   darwin: { arm64: 'aarch64-apple-darwin', x64: 'x86_64-apple-darwin' },
@@ -61,3 +62,6 @@ const bridgeOutput = resolve(outputDirectory, `plaud-bridge-${triple}${suffix}`)
 copyFileSync(bridgeRelease, bridgeOutput)
 if (!suffix) chmodSync(bridgeOutput, 0o755)
 console.log(`[Tauri] Bluetooth bridge ready: ${bridgeOutput}`)
+
+// macOS meeting recorder helper (Swift; Core Audio process taps have no Rust binding).
+if (triple.endsWith('apple-darwin')) buildMeetingBridge(triple, resolve(outputDirectory, `meeting-bridge-${triple}`))

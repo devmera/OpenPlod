@@ -34,7 +34,8 @@
     "db:migrate": "bun run src/db/migrate.ts",
     "device:scan": "cargo run --quiet --release --manifest-path src-tauri/plaud-bridge/Cargo.toml -- scan",
     "device:doctor": "cargo run --quiet --release --manifest-path src-tauri/plaud-bridge/Cargo.toml -- doctor",
-    "build:bridge": "cargo build --release --manifest-path src-tauri/plaud-bridge/Cargo.toml"
+    "build:bridge": "cargo build --release --manifest-path src-tauri/plaud-bridge/Cargo.toml",
+    "build:meeting": "bun run scripts/build-meeting-bridge.ts"
   },
   "dependencies": {
     "@deepgram/sdk": "^3.9.0",

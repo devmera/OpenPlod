@@ -74,6 +74,14 @@ export function RecordingPage() {
     return () => window.clearInterval(timer)
   }, [state])
 
+  // The desktop vault would otherwise mistake this page's own microphone use for a browser call.
+  const capturing = state === 'recording' || state === 'paused'
+  useEffect(() => {
+    if (!capturing || runtime.mode !== 'desktop') return
+    void api.holdMeetings(true).catch(() => undefined)
+    return () => { void api.holdMeetings(false).catch(() => undefined) }
+  }, [capturing, runtime.mode])
+
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (state !== 'recording' && state !== 'paused') return

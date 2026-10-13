@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { MeetingIndicator } from "@/components/MeetingIndicator";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Bell,
@@ -192,6 +193,7 @@ export function Layout() {
             </NavLink>
           </nav>
           <div className="sidebar-actions">
+            {runtime.mode === "desktop" && <MeetingIndicator />}
             <Link
               to="/recordings?view=starred"
               aria-current={libraryView === 'starred' ? 'page' : undefined}

@@ -356,6 +356,22 @@ export interface DeviceRecording {
   retentionState: string | null
 }
 
+export interface MeetingApp { id: string; name: string }
+
+/** Meeting recorder state from the vault server (macOS app only). */
+export interface MeetingStatus {
+  available: boolean
+  /** Why the recorder is unavailable, when it is. */
+  reason: string | null
+  autoRecord: boolean
+  enabledApps: string[]
+  /** Every supported app; `active` while it is capturing the microphone. */
+  apps: (MeetingApp & { enabled: boolean; active: boolean })[]
+  recording: null | { app: MeetingApp | null; startedAt: string; starting: boolean }
+  error: string | null
+  recent: { recordingId: string; title: string; app: string | null; durationSeconds: number; importedAt: string }[]
+}
+
 interface ApiEnvelope<T> {
   success: boolean
   data: T
@@ -864,6 +880,19 @@ export const api = {
 
   getAudioObjectUrl: async (id: string): Promise<string> => {
     return URL.createObjectURL(await api.getAudioBlob(id))
+  },
+
+  getMeetings: async (signal?: AbortSignal): Promise<MeetingStatus> =>
+    (await fetchJSON<ApiEnvelope<MeetingStatus>>('/meetings', { signal })).data,
+  updateMeetingSettings: async (input: { autoRecord?: boolean; enabledApps?: string[] }): Promise<MeetingStatus> =>
+    (await fetchJSON<ApiEnvelope<MeetingStatus>>('/meetings/settings', { method: 'PUT', body: JSON.stringify(input) })).data,
+  startMeeting: async (): Promise<MeetingStatus> =>
+    (await fetchJSON<ApiEnvelope<MeetingStatus>>('/meetings/start', { method: 'POST' })).data,
+  stopMeeting: async (): Promise<MeetingStatus> =>
+    (await fetchJSON<ApiEnvelope<MeetingStatus>>('/meetings/stop', { method: 'POST' })).data,
+  /** While the in-app recorder runs, its own microphone use must not start a meeting recording. */
+  holdMeetings: async (active: boolean): Promise<void> => {
+    await fetchJSON('/meetings/hold', { method: 'POST', body: JSON.stringify({ active }) })
   },
 }
 

@@ -6,6 +6,7 @@ dist/
 src-tauri/target/
 # The Bluetooth bridge is a separate crate with its own build directory.
 src-tauri/plaud-bridge/target/
+src-tauri/meeting-bridge/build/
 src-tauri/binaries/
 *.db
 *.db-shm

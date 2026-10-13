@@ -6,6 +6,7 @@ export class PlaudAutoImport {
   private previous = new Map<string, number>();
   /** Recordings that cannot be decrypted with any key held here; not downloaded again this session. */
   private unreadable = new Set<string>();
+  private skipped = 0;
   private lastChecked: string | null = null;
   private error: string | null = null;
   private failures = 0;
@@ -19,7 +20,7 @@ export class PlaudAutoImport {
     this.database.query("INSERT INTO user_settings(key,value) VALUES('directPlaudAutoImport',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(enabled));
     return this.status();
   }
-  status() { return { enabled: this.enabled(), running: this.running, lastChecked: this.lastChecked, error: this.error,
+  status() { return { enabled: this.enabled(), running: this.running, lastChecked: this.lastChecked, error: this.error, skipped: this.skipped,
     events: this.database.query('SELECT id,recording_id AS recordingId,created_at AS createdAt FROM plaud_import_events ORDER BY id DESC LIMIT 10').all() }; }
   async tick() {
     if (this.running || !this.enabled() || Date.now() < this.retryAt) return;
@@ -48,8 +49,9 @@ export class PlaudAutoImport {
         if (imported.added) this.database.query('INSERT INTO plaud_import_events(recording_id,created_at) VALUES(?,?)').run(imported.recording.id, new Date().toISOString());
       }
       this.previous = observed; this.failures = 0; this.retryAt = 0;
-      const skipped = result.sessions.filter(session => this.unreadable.has(`${result.serial}:${session.sessionId}`)).length;
-      this.error = skipped ? `${skipped} recording${skipped === 1 ? ' was' : 's were'} made under a key this computer does not hold and ${skipped === 1 ? 'was' : 'were'} skipped.` : null;
+      // Reported, not an error: the rest of the list imported normally.
+      this.skipped = result.sessions.filter(session => this.unreadable.has(`${result.serial}:${session.sessionId}`)).length;
+      this.error = null;
       this.database.query('DELETE FROM plaud_import_events WHERE id NOT IN (SELECT id FROM plaud_import_events ORDER BY id DESC LIMIT 100)').run();
     } catch (e) {
       this.error = e instanceof Error ? e.message : 'Plaud automatic import unavailable.';

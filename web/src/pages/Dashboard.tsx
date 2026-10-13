@@ -212,10 +212,10 @@ export function Dashboard() {
     }
     if (action === "transcribe") {
       const done = rows.filter((row) => row.transcriptText?.trim() || row.hasTranscript).length;
-      if (done && !window.confirm(`${count(done)} already ${done === 1 ? "has" : "have"} a transcript and will be transcribed again. Continue?`)) return;
+      if (done && !(await confirmAction(`${count(done)} already ${done === 1 ? "has" : "have"} a transcript and will be transcribed again. Continue?`, { confirmLabel: "Transcribe again" }))) return;
     }
-    if (action === "trash" && !window.confirm(`Move ${count(rows.length)} to Trash? You can restore them from Trash for 30 days.`)) return;
-    if (action === "purge" && !window.confirm(`Permanently delete ${count(rows.length)} and their audio? This cannot be undone.`)) return;
+    if (action === "trash" && !(await confirmAction(`Move ${count(rows.length)} to Trash? You can restore them from Trash for 30 days.`, { confirmLabel: "Move to Trash", destructive: true }))) return;
+    if (action === "purge" && !(await confirmAction(`Permanently delete ${count(rows.length)} and their audio? This cannot be undone.`, { confirmLabel: "Delete permanently", destructive: true }))) return;
     const label = { transcribe: "Queueing", summarize: "Summarizing", star: "Starring", unstar: "Unstarring", trash: "Moving to Trash", restore: "Restoring", purge: "Deleting" }[action];
     const failed: string[] = [];
     setError("");

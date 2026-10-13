@@ -45,6 +45,16 @@ pub struct RecorderKey {
     pub private_key: String,
 }
 
+/// The result of one sync attempt.
+#[derive(uniffi::Record)]
+pub struct SyncOutcome {
+    /// The recorder is recording right now: nothing was listed or downloaded, so a recording in
+    /// progress is never fetched half-written. Try again once it has stopped.
+    pub recording: bool,
+    /// Everything on the recorder (empty when `recording`).
+    pub files: Vec<RecorderFile>,
+}
+
 #[derive(uniffi::Record)]
 pub struct RecorderFile {
     /// Session id: the recording's start time in Unix seconds.
@@ -129,28 +139,33 @@ pub async fn pull_new_recordings(
     skip: Vec<u32>,
     out_dir: String,
     listener: Arc<dyn PullListener>,
-) -> Result<Vec<RecorderFile>, CompanionError> {
+) -> Result<SyncOutcome, CompanionError> {
     let key = decode(&key)?;
     std::fs::create_dir_all(&out_dir).context("creating the download folder")?;
     let mut link = Foreign { transport, timeout_ms: timeout_secs * 1000 };
     let (mut session, port) = open(&mut link, &key).await?;
+    let normal = std::mem::replace(&mut link.timeout_ms, 3000);
+    let state = driver::state(&mut link, &mut session).await.unwrap_or(driver::DeviceState::Other);
+    link.timeout_ms = normal;
+    if state == driver::DeviceState::Recording {
+        return Ok(SyncOutcome { recording: true, files: Vec::new() });
+    }
     // Show the recorder's app icon while syncing, as Plaud's app does, but only when it clearly
-    // reports idle: SET_ACTIVE stops a recording in progress. Either step failing only costs the icon.
-    let active = signal_active(&mut link, &mut session).await;
+    // reports idle: SET_ACTIVE stops a recording in progress. Setting it failing only costs the icon.
+    let active = state == driver::DeviceState::Idle && signal_active(&mut link, &mut session).await;
     let result = pull_listed(&mut link, &mut session, port, &key, &skip, &out_dir, &listener).await;
     if active {
         let normal = std::mem::replace(&mut link.timeout_ms, 3000);
         let _ = driver::set_active(&mut link, &mut session, false).await;
         link.timeout_ms = normal;
     }
-    Ok(result?)
+    Ok(SyncOutcome { recording: false, files: result? })
 }
 
-/// GetState, then SET_ACTIVE on only if idle; true when the flag was set (and must be cleared).
+/// SET_ACTIVE on (the caller checked the recorder is idle); true when set, so it must be cleared.
 async fn signal_active(link: &mut Foreign, session: &mut plaud_protocol::session::Session) -> bool {
     let normal = std::mem::replace(&mut link.timeout_ms, 3000);
-    let set = matches!(driver::is_idle(link, session).await, Ok(true))
-        && driver::set_active(link, session, true).await.is_ok();
+    let set = driver::set_active(link, session, true).await.is_ok();
     link.timeout_ms = normal;
     set
 }

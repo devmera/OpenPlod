@@ -102,12 +102,18 @@ final class SyncEngine: ObservableObject {
             let listener = ProgressRelay { [weak self] id, state, detail in
                 Task { @MainActor in self?.progress(key, id, state, detail) }
             }
+            let outcome: SyncOutcome
             do {
-                _ = try await pullNewRecordings(key: key, transport: connection, timeoutSecs: 20, skip: Array(skip), outDir: folder.path, listener: listener)
+                outcome = try await pullNewRecordings(key: key, transport: connection, timeoutSecs: 20, skip: Array(skip), outDir: folder.path, listener: listener)
                 RecorderBluetooth.shared.disconnect(connection)
             } catch {
                 RecorderBluetooth.shared.disconnect(connection)
                 throw error
+            }
+            // Never fetch a recording that is still being made; the next wake-up after it stops will.
+            if outcome.recording && localFiles().isEmpty {
+                summary = "The recorder is recording. It will sync when the recording is done."
+                return 0
             }
             for file in localFiles() {
                 guard let session = UInt32(file.deletingPathExtension().lastPathComponent) else { continue }

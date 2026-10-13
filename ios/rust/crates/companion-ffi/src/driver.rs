@@ -220,20 +220,31 @@ pub async fn pull<L: Link>(
     file::decrypt(private_key, &raw).context("decrypting recording")
 }
 
-/// GetState (opcode 3). True only when the reply clearly says idle: state byte 0 (SDK `s0.g`:
-/// 0 idle, 1 record, 2 transfer, 3/4 switching on/off) and a status other than 4099 (recording).
-/// A short or unexpected reply counts as not idle.
-pub async fn is_idle<L: Link>(link: &mut L, session: &mut Session) -> Result<bool> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceState {
+    Idle,
+    Recording,
+    /// Transferring, switching on/off, or a reply we cannot read.
+    Other,
+}
+
+/// GetState (opcode 3). SDK `s0.g`: state byte 0 idle, 1 record, 2 transfer, 3/4 switching on/off;
+/// a status of 4099 also means recording. A short or unexpected reply is `Other`.
+pub async fn state<L: Link>(link: &mut L, session: &mut Session) -> Result<DeviceState> {
     link.write(&session.seal(&frame::control(OP_GET_STATE, &[]))).await?;
     loop {
         let plain = session.open(&link.next().await?)?;
         let Frame::Control { opcode: OP_GET_STATE, payload } = frame::parse(&plain)? else { continue };
         // The SDK reads status u32 @3 and state @8 of the frame, i.e. payload[0..4] and payload[5].
         if payload.len() < 6 {
-            return Ok(false);
+            return Ok(DeviceState::Other);
         }
         let status = u32::from_le_bytes(payload[0..4].try_into().unwrap());
-        return Ok(status != STATUS_RECORDING && payload[5] == 0);
+        return Ok(match (status, payload[5]) {
+            (STATUS_RECORDING, _) | (_, 1) => DeviceState::Recording,
+            (_, 0) => DeviceState::Idle,
+            _ => DeviceState::Other,
+        });
     }
 }
 
@@ -564,19 +575,20 @@ mod tests {
     async fn an_idle_recorder_gets_the_active_flag_on_and_off() {
         let mut dev = FakeDevice::new(false);
         let mut session = logged_in(&mut dev).await;
-        assert!(is_idle(&mut dev, &mut session).await.unwrap());
+        assert_eq!(state(&mut dev, &mut session).await.unwrap(), DeviceState::Idle);
         set_active(&mut dev, &mut session, true).await.unwrap();
         set_active(&mut dev, &mut session, false).await.unwrap();
         assert_eq!(dev.active, vec![true, false]);
     }
 
     #[tokio::test]
-    async fn a_recording_or_unclear_state_is_not_idle() {
-        for state in [(0, 1), (STATUS_RECORDING, 0), (0, 2), (0, 3)] {
+    async fn recording_and_other_states_are_told_apart() {
+        for (reply, expected) in [((0, 1), DeviceState::Recording), ((STATUS_RECORDING, 0), DeviceState::Recording),
+                                  ((0, 2), DeviceState::Other), ((0, 3), DeviceState::Other), ((0, 0), DeviceState::Idle)] {
             let mut dev = FakeDevice::new(false);
-            dev.state = state;
+            dev.state = reply;
             let mut session = logged_in(&mut dev).await;
-            assert!(!is_idle(&mut dev, &mut session).await.unwrap(), "{state:?}");
+            assert_eq!(state(&mut dev, &mut session).await.unwrap(), expected, "{reply:?}");
         }
     }
 }

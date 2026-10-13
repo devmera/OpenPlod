@@ -5,7 +5,7 @@ import * as icons from './icons'
 
 describe('OpenPlod custom SVG icons', () => {
   test('every glyph renders locally with a stable viewBox and distinct identity', () => {
-    expect(Object.keys(icons)).toHaveLength(91)
+    expect(Object.keys(icons)).toHaveLength(92)
     for (const Icon of Object.values(icons)) {
       const markup = renderToStaticMarkup(createElement(Icon))
       expect(markup).toContain('viewBox="0 0 24 24"')

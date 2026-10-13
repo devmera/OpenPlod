@@ -114,3 +114,10 @@ test('Ollama rejects absent and cloud models before sending transcript', async (
   expect(await installedOllamaModels(fetcher)).toEqual(['local:latest']);
   await expect(completeText({ provider: 'ollama', model: 'remote:cloud' }, [], {}, fetcher)).rejects.toThrow('not installed'); expect(calls).toBe(2);
 });
+
+test('Ollama context grows with the transcript instead of silently truncating it', async () => {
+  const { ollamaContext } = await import('./text');
+  expect(ollamaContext([{ role: 'user', content: 'short' }], 6000)).toBe(8192);
+  expect(ollamaContext([{ role: 'user', content: 'x'.repeat(45000) }], 6000)).toBe(32768);
+  expect(ollamaContext([{ role: 'user', content: 'x'.repeat(24000) }], 6000)).toBe(16384);
+});

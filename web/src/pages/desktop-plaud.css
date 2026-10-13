@@ -12,6 +12,26 @@
 .plaud-checked { display: inline-flex; align-items: center; gap: 7px; color: var(--muted-foreground); }
 .plaud-checked svg { width: 15px; height: 15px; }
 .plaud-workspace-grid { display: grid; grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr); gap: 22px 24px; }
+.plaud-tabs { display: flex; gap: 4px; margin: -6px 0 22px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.plaud-tabs button { position: relative; display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; padding: 10px 14px; margin-bottom: -1px; font-size: 13px; font-weight: 500; color: var(--muted-foreground); border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0; }
+.plaud-tabs button svg { width: 15px; height: 15px; }
+.plaud-tabs button:hover { color: var(--foreground); background: var(--accent); }
+.plaud-tabs button[aria-selected="true"] { color: var(--foreground); border-bottom-color: var(--primary); }
+.plaud-tabs button:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.plaud-tab-attention { width: 7px; height: 7px; border-radius: 999px; background: var(--destructive); }
+.plaud-tab-recorder { grid-template-areas: "callout callout" "overview vault" "recordings vault"; }
+.plaud-tab-recorder > .plaud-setup-callout { grid-area: callout; }
+.plaud-tab-recorder > .plaud-device-overview { grid-area: overview; }
+.plaud-tab-recorder > .plaud-device-recordings { grid-area: recordings; }
+.plaud-tab-recorder > .plaud-vault-column { grid-area: vault; align-self: start; }
+.plaud-setup-callout { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; font-size: 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--accent); }
+.plaud-setup-callout > svg { width: 18px; height: 18px; flex-shrink: 0; color: var(--primary); }
+.plaud-setup-callout > span { flex: 1; min-width: 200px; }
+.plaud-tab-setup, .plaud-tab-cloud { display: grid; gap: 28px; max-width: 880px; border-top: 0; padding-top: 0; }
+.plaud-tab-setup > * + * { border-top: 1px solid var(--border); padding-top: 22px; }
+.plaud-tab-setup .plaud-health { padding: 0; border: 0; }
+.plaud-tab-setup > .plaud-health { border-top: 1px solid var(--border); padding-top: 22px; }
+.plaud-workspace [hidden] { display: none !important; }
 .plaud-workspace-grid > * { min-width: 0; }
 .plaud-device-overview { display: grid; grid-template-columns: minmax(130px, .85fr) minmax(0, 1fr); align-items: center; gap: 22px; padding: 4px 0 22px; border-bottom: 1px solid var(--border); }
 .plaud-product-image { height: 288px; display: flex; justify-content: center; align-items: center; }
@@ -111,6 +131,8 @@
 }
 @media (max-width: 950px) {
   .plaud-workspace-grid { grid-template-columns: minmax(0, 1fr); }
+  .plaud-tab-recorder { grid-template-areas: "callout" "overview" "recordings" "vault"; }
+  .plaud-tab-recorder > .plaud-vault-column { border-left: 0; padding-left: 0; }
   .plaud-device-overview { grid-template-columns: minmax(120px, .7fr) minmax(0, 1fr); }
   .plaud-product-image { height: 250px; }
   .plaud-health, .plaud-vault-column { border-left: 0; padding-left: 0; }
@@ -144,4 +166,4 @@
   .plaud-health dt { gap: 8px; font-size: 11px; }
   .plaud-authorizations .device-recording-row { flex-wrap: wrap; }
 }
-@media (prefers-reduced-motion: reduce) { .plaud-switch > span { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { .plaud-switch > span, .plaud-tabs button { transition: none !important; } }

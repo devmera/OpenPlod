@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { AudioLines, Bluetooth, Check, CheckCircle2, Clock3, Download, FileAudio, FolderOpen, HardDrive, Loader2, Radio, RefreshCw, ShieldCheck, X } from "@/components/icons"
+import { Link, useSearchParams } from 'react-router-dom'
+import { AudioLines, Bluetooth, Check, CheckCircle2, Clock3, CloudUpload, Download, FileAudio, FolderOpen, HardDrive, Loader2, Radio, RefreshCw, ShieldCheck, X } from "@/components/icons"
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/icon-button'
 import { NoteDialog } from '@/components/NoteDialogs'
@@ -10,6 +10,15 @@ import { PlaudDeviceAuthorization } from '@/components/PlaudDeviceAuthorization'
 import { PlaudSystemCheck } from '@/components/PlaudSystemCheck'
 import { api, type DashboardStats, type DeviceRecording, type PlaudStatus } from '@/lib/api'
 import './desktop-plaud.css'
+
+/** The page's three jobs: everyday transfer, one-time setup and diagnostics, and the cloud import. */
+const TABS = [
+  { id: 'recorder', label: 'Recorder', icon: Bluetooth },
+  { id: 'setup', label: 'Setup', icon: ShieldCheck },
+  { id: 'cloud', label: 'Plaud cloud', icon: CloudUpload },
+] as const
+type TabId = typeof TABS[number]['id']
+const isTab = (value: string | null): value is TabId => TABS.some(tab => tab.id === value)
 
 const sessionDate = (session: DeviceRecording) => new Date(session.sessionId * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
@@ -25,6 +34,34 @@ export function DesktopPlaud() {
   const [checkedAt, setCheckedAt] = useState<Date | null>(null)
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [statsError, setStatsError] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [authorized, setAuthorized] = useState<boolean | null>(null)
+  const requestedTab = searchParams.get('tab')
+  // Without an explicit tab, open Setup until this computer is authorized for the recorder.
+  const tab: TabId = isTab(requestedTab) ? requestedTab : authorized === false ? 'setup' : 'recorder'
+  const selectTab = useCallback((next: TabId) => {
+    setSearchParams(current => { const params = new URLSearchParams(current); params.set('tab', next); return params }, { replace: true })
+  }, [setSearchParams])
+  const tabRefs = useRef<Partial<Record<TabId, HTMLButtonElement | null>>>({})
+  const onTabKey = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    const index = TABS.findIndex(entry => entry.id === tab)
+    const target = event.key === 'ArrowRight' ? (index + 1) % TABS.length : event.key === 'ArrowLeft' ? (index - 1 + TABS.length) % TABS.length
+      : event.key === 'Home' ? 0 : event.key === 'End' ? TABS.length - 1 : -1
+    if (target < 0) return
+    event.preventDefault()
+    selectTab(TABS[target].id)
+    tabRefs.current[TABS[target].id]?.focus()
+  }
+  const wasAuthorized = useRef<boolean | null>(null)
+  const loadAuthorization = useCallback(() => {
+    void api.getPlaudIdentity().then(identity => {
+      if (!mounted.current) return
+      // Finishing setup leads straight to the recordings.
+      if (wasAuthorized.current === false && identity.authorized) selectTab('recorder')
+      wasAuthorized.current = identity.authorized
+      setAuthorized(identity.authorized)
+    }).catch(() => undefined)
+  }, [selectTab])
   const mounted = useRef(true)
   const active = useRef<AbortController | null>(null)
   const cancelling = useRef(false)
@@ -37,10 +74,10 @@ export function DesktopPlaud() {
       .catch(() => { if (mounted.current) setStatsError('Vault summary unavailable') })
   }, [])
   useEffect(() => {
-    mounted.current = true; loadStats()
+    mounted.current = true; loadStats(); loadAuthorization()
     window.addEventListener('plaud:sync-complete', loadStats)
     return () => { mounted.current = false; active.current?.abort(); window.removeEventListener('plaud:sync-complete', loadStats) }
-  }, [loadStats])
+  }, [loadStats, loadAuthorization])
 
   const scan = async () => {
     if (active.current) return
@@ -106,8 +143,16 @@ export function DesktopPlaud() {
     <header className="plaud-page-heading"><div className="plaud-page-title"><span className="plaud-heading-icon"><Bluetooth /></span><div><h1>Plaud Note Pro</h1><p>Device, recordings &amp; imports</p></div></div>
       <div className="plaud-status-strip" role="status"><span className="plaud-state" data-verified={access}><i />{statusLabel}</span>{checkedAt && <span className="plaud-checked"><Clock3 />Checked {checkedAt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>}</div>
     </header>
+    <div className="plaud-tabs" role="tablist" aria-label="Plaud sections">
+      {TABS.map(({ id, label, icon: Icon }) => <button key={id} type="button" role="tab" id={`plaud-tab-${id}`} aria-controls={`plaud-panel-${id}`}
+        aria-selected={tab === id} tabIndex={tab === id ? 0 : -1} ref={node => { tabRefs.current[id] = node }}
+        onClick={() => selectTab(id)} onKeyDown={onTabKey}>
+        <Icon />{label}{id === 'setup' && authorized === false && <span className="plaud-tab-attention" aria-label="Action needed" />}
+      </button>)}
+    </div>
     {(error || notice) && <div className={`plaud-feedback ${error ? 'is-error' : ''}`} role={error ? 'alert' : 'status'}>{error ? <Radio /> : <Check />}<span>{error || notice}</span><IconButton label="Dismiss device message" onClick={() => { setError(''); setNotice('') }}><X /></IconButton></div>}
-    <div className="plaud-workspace-grid">
+    <div className="plaud-workspace-grid plaud-tab-recorder" role="tabpanel" id="plaud-panel-recorder" aria-labelledby="plaud-tab-recorder" hidden={tab !== 'recorder'}>
+      {authorized === false && <div className="plaud-setup-callout" role="status"><ShieldCheck /><span>This computer is not authorized for your Note Pro yet, so it cannot read its recordings.</span><Button size="sm" variant="outline" onClick={() => selectTab('setup')}>Open setup</Button></div>}
       <section className="plaud-device-overview" aria-label="Desktop Plaud connection">
         <div className="plaud-product-image"><img src="/plaud-note-pro.png" alt="Plaud Note Pro recorder" width="220" height="280" /></div>
         <div className="plaud-device-info"><h2>{status?.deviceName || 'Plaud Note Pro'}</h2><p>AI voice recorder</p>
@@ -116,10 +161,6 @@ export function DesktopPlaud() {
             {busy && <IconButton label="Cancel device operation" onClick={() => void cancel()}><X /></IconButton>}</div>
           <div className="plaud-secondary-actions"><Button size="sm" variant="outline" disabled={busy || !pending.length} onClick={() => setConfirmation(pending)}><Download />Import new</Button><Button asChild variant="outline" size="sm"><Link to="/recordings"><FolderOpen />Open library</Link></Button></div>
         </div>
-      </section>
-      <section className="plaud-health" aria-label="Connection health"><header className="plaud-section-heading"><span className="plaud-section-icon"><ShieldCheck /></span><div><h2>Connection health</h2><p>{access ? 'Recording list verified on this computer' : 'Awaiting verified device access'}</p></div>{access && <CheckCircle2 className="plaud-positive" />}</header>
-        <dl>{states.map(({ icon: Icon, name, value, ok }) => <div key={name}><dt><Icon />{name}</dt><dd className="plaud-state" data-verified={ok}><i />{value}</dd></div>)}</dl>
-        {status?.detail && <details className="plaud-diagnostics"><summary>Connection details</summary><p>{status.detail}</p></details>}
       </section>
       <section className="plaud-device-recordings" aria-label="Recordings on Note Pro" ref={recordingSection}>
         <header className="plaud-section-heading"><span className="plaud-section-icon"><FileAudio /></span><div><h2>On your Note Pro</h2><p>{sessions === null ? 'Recording count unknown' : `${sessions.length} recordings / ${pending.length} new`}</p></div><Button size="sm" disabled={busy || !selected.length} onClick={() => setConfirmation(pending.filter(session => selected.includes(session.sessionId)))}><Download /><span>Import selected{selected.length ? ` (${selected.length})` : ''}</span></Button></header>
@@ -141,7 +182,18 @@ export function DesktopPlaud() {
         </section>
         <DesktopImportPreferences />
       </div>
-      <div className="plaud-authorizations"><PlaudSystemCheck /><PlaudCloudImport /><PlaudDeviceAuthorization status={status} onAuthorized={() => void scan()} /><DesktopAuthorizations /></div>
+    </div>
+    <div className="plaud-authorizations plaud-tab-setup" role="tabpanel" id="plaud-panel-setup" aria-labelledby="plaud-tab-setup" hidden={tab !== 'setup'}>
+      <PlaudDeviceAuthorization status={status} onAuthorized={() => { loadAuthorization(); void scan() }} />
+      <PlaudSystemCheck />
+      <section className="plaud-health" aria-label="Connection health"><header className="plaud-section-heading"><span className="plaud-section-icon"><ShieldCheck /></span><div><h2>Connection health</h2><p>{access ? 'Recording list verified on this computer' : 'Awaiting verified device access'}</p></div>{access && <CheckCircle2 className="plaud-positive" />}</header>
+        <dl>{states.map(({ icon: Icon, name, value, ok }) => <div key={name}><dt><Icon />{name}</dt><dd className="plaud-state" data-verified={ok}><i />{value}</dd></div>)}</dl>
+        {status?.detail && <details className="plaud-diagnostics"><summary>Connection details</summary><p>{status.detail}</p></details>}
+      </section>
+      <DesktopAuthorizations />
+    </div>
+    <div className="plaud-authorizations plaud-tab-cloud" role="tabpanel" id="plaud-panel-cloud" aria-labelledby="plaud-tab-cloud" hidden={tab !== 'cloud'}>
+      <PlaudCloudImport />
     </div>
     {confirmation && <NoteDialog title="Import from Plaud" description={`${confirmation.length} recording${confirmation.length === 1 ? '' : 's'}`} busy={false} onClose={() => setConfirmation(null)}>
       <p className="plaud-confirm-copy">Save the selected audio to your OpenPlod vault? Original recordings will stay on your Plaud.</p><ul className="plaud-confirm-list">{confirmation.map(session => <li key={session.sessionId}><FileAudio /><span>{sessionDate(session)}</span><small>{Math.round(session.size / 1024)} KB</small></li>)}</ul>

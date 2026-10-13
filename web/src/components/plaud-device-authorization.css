@@ -16,6 +16,7 @@
 .plaud-authorize-field input, .plaud-authorize-field select { width: 100%; min-width: 0; padding: 8px 10px; font-size: 12px; color: inherit; background: var(--background); border: 1px solid var(--border); border-radius: 6px; }
 .plaud-authorize-field input:focus-visible, .plaud-authorize-field select:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .plaud-authorize-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.plaud-authorize-hint { font-size: 11px; color: var(--muted-foreground); }
 .plaud-authorize-notice { color: var(--positive); }
 .plaud-authorize-error { color: var(--destructive); }
 .plaud-authorize-help { margin-top: 12px; font-size: 11px; color: var(--muted-foreground); }

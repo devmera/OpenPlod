@@ -119,5 +119,6 @@ test('Ollama context grows with the transcript instead of silently truncating it
   const { ollamaContext } = await import('./text');
   expect(ollamaContext([{ role: 'user', content: 'short' }], 6000)).toBe(8192);
   expect(ollamaContext([{ role: 'user', content: 'x'.repeat(45000) }], 6000)).toBe(32768);
+  expect(ollamaContext([{ role: 'user', content: 'x'.repeat(160000) }], 6000)).toBe(65536);
   expect(ollamaContext([{ role: 'user', content: 'x'.repeat(24000) }], 6000)).toBe(16384);
 });

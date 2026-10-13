@@ -136,16 +136,15 @@ struct RecorderView: View {
             ForEach(days, id: \.0) { day, items in
                 Section(day) {
                     ForEach(items) { item in
-                        VStack(spacing: 0) {
-                            Button {
-                                withAnimation(.snappy) {
-                                    player.stop()
-                                    expanded = expanded == item.id ? nil : item.id
-                                }
+                        if item.place == .otherKey {
+                            row(item).opacity(0.6)
+                        } else {
+                            // Native expand/collapse; the player is only built while the row is open.
+                            DisclosureGroup(isExpanded: Binding(
+                                get: { expanded == item.id },
+                                set: { open in player.stop(); expanded = open ? item.id : nil })) {
+                                InlinePlayer(item: item, player: player)
                             } label: { row(item) }
-                            .buttonStyle(.plain)
-                            .disabled(item.place == .otherKey)
-                            if expanded == item.id { InlinePlayer(item: item, player: player).transition(.opacity) }
                         }
                     }
                 }

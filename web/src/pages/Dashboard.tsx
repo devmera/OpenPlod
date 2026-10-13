@@ -278,7 +278,7 @@ export function Dashboard() {
     }
   };
   const trash = async (row: Recording) => {
-    if (!window.confirm(`Move "${row.title}" to Trash? You can restore it from Trash for 30 days.`)) return;
+    if (!(await confirmAction(`Move "${row.title}" to Trash? You can restore it from Trash for 30 days.`, { confirmLabel: "Move to Trash", destructive: true }))) return;
     try {
       await api.trashRecording(row.id);
       if (selected === row.id) setSelected("");

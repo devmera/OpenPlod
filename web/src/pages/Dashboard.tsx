@@ -199,6 +199,16 @@ export function Dashboard() {
       setError((e as Error).message);
     }
   };
+  const trash = async (row: Recording) => {
+    if (!window.confirm(`Move "${row.title}" to Trash? You can restore it from Trash for 30 days.`)) return;
+    try {
+      await api.trashRecording(row.id);
+      if (selected === row.id) setSelected("");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
   const purge = async (id: string) => {
     if (
       !window.confirm(
@@ -452,6 +462,10 @@ export function Dashboard() {
                             >
                               <MessageSquare />Ask AI
                             </DropdownMenu.Item>
+                            <DropdownMenu.Separator />
+                            <DropdownMenu.Item className="danger" onSelect={() => void trash(row)}>
+                              <Trash2 />Move to Trash
+                            </DropdownMenu.Item>
                           </DropdownMenu.Content>
                         </DropdownMenu.Portal>
                       </DropdownMenu.Root>
@@ -465,6 +479,8 @@ export function Dashboard() {
                     <ContextMenu.Item onSelect={() => editTags(row)}><Tags />Edit tags</ContextMenu.Item>
                     <ContextMenu.Item onSelect={() => navigate(`/recording/${row.id}`)}><Pencil />Edit recording</ContextMenu.Item>
                     <ContextMenu.Item onSelect={() => navigate(`/ai?recording=${row.id}`)}><MessageSquare />Ask AI</ContextMenu.Item>
+                    <ContextMenu.Separator />
+                    <ContextMenu.Item className="danger" onSelect={() => void trash(row)}><Trash2 />Move to Trash</ContextMenu.Item>
                   </ContextMenu.Content>
                 </ContextMenu.Portal>
                 </ContextMenu.Root>

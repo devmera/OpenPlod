@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Check, KeyRound, Loader2, ShieldCheck, Trash2 } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { api, type PlaudIdentityStatus, type PlaudStatus } from '@/lib/api'
+import { plaudSignInSupported, signInToPlaud } from '@/lib/plaud-sign-in'
 import './plaud-device-authorization.css'
 
 /**
@@ -46,6 +47,18 @@ export function PlaudDeviceAuthorization({ status, onAuthorized, variant = 'page
     } finally { setBusy(false) }
   }
 
+  const signIn = async () => {
+    setBusy(true); setError(''); setNotice('')
+    try {
+      const { userToken } = await signInToPlaud()
+      if (!userToken) throw new Error('Signed in, but Plaud did not provide a sign-in token. Paste it manually instead.')
+      setToken(userToken)
+      setNotice('Signed in to Plaud. Wake the Note Pro, then authorize this computer.')
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure))
+    } finally { setBusy(false) }
+  }
+
   const forget = async () => {
     setBusy(true); setError(''); setNotice('')
     try {
@@ -82,6 +95,9 @@ export function PlaudDeviceAuthorization({ status, onAuthorized, variant = 'page
       {waitingForDevice
         ? <p>Wake the Note Pro and keep it near this computer so its serial number and Bluetooth address can be read.</p>
         : status?.deviceSerial && <p>Recorder detected: {status.deviceName || 'Plaud'} / <code>{status.deviceSerial}</code></p>}
+      {plaudSignInSupported() && <div className="plaud-authorize-actions">
+        <Button variant="outline" size="sm" disabled={busy} onClick={() => void signIn()}><KeyRound />Sign in to Plaud</Button>
+      </div>}
       <label className="plaud-authorize-field"><span>Plaud sign-in token</span>
         <input type="password" autoComplete="off" spellCheck={false} value={token} placeholder="Paste tokenstr from web.plaud.ai" aria-label="Plaud sign-in token" onChange={event => setToken(event.target.value)} />
       </label>

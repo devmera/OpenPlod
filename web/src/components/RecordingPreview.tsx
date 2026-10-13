@@ -31,6 +31,8 @@ import {
   Code,
 } from "@/components/icons";
 import { loadWaveform } from '@/lib/audio-loader';
+import { ProcessingState } from '@/components/ProcessingState';
+import { useProcessing } from '@/lib/processing';
 import { IconButton } from './ui/icon-button';
 import { PlaybackSpeedMenu } from './PlaybackSpeedMenu';
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
@@ -86,6 +88,7 @@ export function RecordingPreview({
     wave = useRef<WaveSurfer | null>(null),
     audioUrl = useRef("");
   const navigate = useNavigate();
+  const processing = useProcessing(recording);
   useEffect(() => {
     let disposed = false;
     api
@@ -529,6 +532,8 @@ export function RecordingPreview({
                 {recording.transcriptText}
               </ReactMarkdown>
             </div>
+          ) : processing ? (
+            <ProcessingState processing={processing} compact />
           ) : (
             <div className="preview-empty">
               <FileAudio />

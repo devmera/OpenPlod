@@ -534,3 +534,23 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .device-desktop > svg { width: 36px; height: 36px; margin-bottom: 16px; color: var(--primary); }
 .device-desktop p { color: var(--muted-foreground); margin-block: 12px 24px; max-width: 48ch; }
 @media (max-width: 640px) { .device-page { padding: 20px 16px; } .device-recording-row button { min-width: 44px; min-height: 44px; } }
+
+/* Processing feedback: shown where the transcript will appear while a recording is queued or worked on. */
+.processing-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 260px; padding: 32px 24px; text-align: center; }
+.processing-state.compact { min-height: 200px; }
+.processing-state strong { font-size: 15px; font-weight: 600; color: var(--foreground); }
+.processing-state p { max-width: 34ch; margin: 0; color: var(--muted-foreground); font-size: 13px; line-height: 1.5; }
+.processing-bars { display: flex; align-items: center; gap: 5px; height: 40px; margin-bottom: 6px; }
+.processing-bars i { display: block; width: 5px; height: 100%; border-radius: 3px; background: var(--primary); transform-origin: center; animation: processing-wave 1.1s ease-in-out infinite; }
+.processing-bars i:nth-child(2) { animation-delay: -0.9s; } .processing-bars i:nth-child(3) { animation-delay: -0.7s; }
+.processing-bars i:nth-child(4) { animation-delay: -0.5s; } .processing-bars i:nth-child(5) { animation-delay: -0.3s; }
+.processing-state.queued .processing-bars i { background: var(--muted-foreground); animation-duration: 2.2s; }
+@keyframes processing-wave { 0%, 100% { transform: scaleY(0.25); opacity: 0.55; } 50% { transform: scaleY(1); opacity: 1; } }
+.processing-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 5px; padding: 2px 7px; font-size: 11px; white-space: nowrap; color: var(--primary); background: color-mix(in srgb, var(--primary) 14%, transparent); }
+.processing-chip.queued { color: var(--muted-foreground); background: var(--secondary); }
+.processing-chip i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: processing-pulse 1.2s ease-in-out infinite; }
+@keyframes processing-pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .processing-bars i, .processing-chip i { animation: none; }
+  .processing-bars i { transform: scaleY(0.6); }
+}

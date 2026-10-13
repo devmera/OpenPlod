@@ -66,6 +66,8 @@ describe('recording library', () => {
     writeFileSync(join(nested, 'voice-note.opus'), 'unsupported');
     writeFileSync(join(nested, 'voice-note.wav'), 'audio-two');
     writeFileSync(join(exportRoot, 'metadata.json'), '{}');
+    mkdirSync(join(exportRoot, '#recycle'), { recursive: true });
+    writeFileSync(join(exportRoot, '#recycle', 'deleted.m4a'), 'deleted-on-the-nas');
 
     const recordings = await new FolderWatcher(exportRoot).listRecordings();
 

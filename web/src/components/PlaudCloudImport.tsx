@@ -153,7 +153,7 @@ export function PlaudCloudImport() {
       <p className="device-muted">Get every recording off your Plaud account over the internet — no Bluetooth, no recorder authorization. Audio, transcripts and AI summaries come along.</p>
       {plaudSignInSupported() && <div className="plaud-cloud-actions">
         <Button disabled={busy} onClick={() => void signIn()}>{busy ? <Loader2 className="animate-spin" /> : <KeyRound />}Sign in to Plaud</Button>
-        <span className="device-muted">or paste a token below</span>
+        <span className="device-muted">Email and password sign-in only: Google and Apple sign-in do not work in this window. Or paste a token below.</span>
       </div>}
       <label className="plaud-cloud-field"><span>Plaud sign-in token</span>
         <input type="password" autoComplete="off" spellCheck={false} value={token} placeholder="Paste workspaceToken (or tokenstr) from web.plaud.ai" aria-label="Plaud sign-in token" onChange={event => setToken(event.target.value)} />

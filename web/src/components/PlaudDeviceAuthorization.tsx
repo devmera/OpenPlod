@@ -157,6 +157,7 @@ export function PlaudDeviceAuthorization({ status, onAuthorized, variant = 'page
       {identity?.bindPending && keySource === 'local' && <p className="plaud-authorize-notice">The recorder was offered a key from this computer but the bind was not confirmed. Wake it and authorize again to finish with the same key.</p>}
       {plaudSignInSupported() && <div className="plaud-authorize-actions">
         <Button variant="outline" size="sm" disabled={busy} onClick={() => void signIn()}><KeyRound />Sign in to Plaud</Button>
+        <span className="plaud-authorize-hint">Email and password only; Google and Apple sign-in do not work in this window.</span>
       </div>}
       <label className="plaud-authorize-field"><span>Plaud sign-in token</span>
         <input type="password" autoComplete="off" spellCheck={false} value={token} placeholder="Paste tokenstr from web.plaud.ai" aria-label="Plaud sign-in token" onChange={event => setToken(event.target.value)} />

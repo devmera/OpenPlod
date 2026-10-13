@@ -6,6 +6,7 @@ import { Button } from './ui/button'
 import { api, type PlaudSyncStatus, type Settings } from "@/lib/api"
 import { apiUrl, authenticatedHeaders } from '@/lib/runtime'
 import { deviceCommand, vaultArguments } from '@/lib/plaud-device'
+import { confirmAction } from '@/lib/confirm'
 
 async function plaudRequest<T>(path: string, body?: unknown, method?: string): Promise<T> {
   const response = await fetch(apiUrl(`/plaud${path}`), { method: method || (body ? 'POST' : 'GET'),
@@ -101,7 +102,7 @@ export function DesktopAuthorizations({ inline = false }: { inline?: boolean }) 
     catch (e) { setError((e as Error).message) } finally { setBusy('') }
   }
   const forget = async (phone: ApprovedPhone) => {
-    if (!window.confirm(`Remove "${phone.name}" from this list? This does not take the recorder key back: unlink the phone in its app to remove it there.`)) return
+    if (!(await confirmAction(`Remove "${phone.name}" from this list? This does not take the recorder key back: unlink the phone in its app to remove it there.`, { confirmLabel: 'Remove from list' }))) return
     setBusy(phone.id); setError('')
     try { await plaudRequest(`/approved-phones/${phone.id}`, undefined, 'DELETE'); setPhones(rows => rows.filter(row => row.id !== phone.id)) }
     catch (e) { setError((e as Error).message) } finally { setBusy('') }

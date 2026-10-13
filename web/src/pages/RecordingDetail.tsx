@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import ReactMarkdown from 'react-markdown'
@@ -41,20 +41,23 @@ import { activeWordIndex, followedSegmentIndex, hasWordTiming } from '@/lib/tran
 import { TranscribeDialog } from '@/components/TranscribeDialog'
 import { RecordingBookmarks } from '@/components/RecordingBookmarks'
 import { SegmentEditor } from '@/components/SegmentEditor'
+import { RecordingSearch } from '@/components/RecordingSearch'
+import { highlightText, searchRecording, type SummaryLine } from '@/lib/recording-search'
 import { api, speakerLabel, type Recording, type TranscriptSegment, type TranscriptVersion } from '@/lib/api'
 import { formatDuration } from '@/lib/utils'
 import { exportDocument, exportOriginalAudio, recordingMarkdown, safeDocumentName as safeName } from '@/lib/document-export'
 import { deviceCommand, supportsPlaudDevice, vaultArguments } from '@/lib/plaud-device'
 
 type BusyAction = 'transcribing' | 'summarizing' | 'saving' | 'forwarding' | null
-type DocumentMode = 'preview' | 'edit' | 'timestamps' | 'studio'
+type DocumentMode = 'summary' | 'preview' | 'edit' | 'timestamps' | 'studio'
 
 /**
  * One spoken segment, with the active word highlighted when the provider gave
  * real per-word timings. Without them the whole segment highlights instead;
  * word positions are never interpolated from a segment's span.
  */
-function SegmentCopy({ segment, time, wordTiming }: { segment: TranscriptSegment; time: number; wordTiming: boolean }) {
+function SegmentCopy({ segment, time, wordTiming, query }: { segment: TranscriptSegment; time: number; wordTiming: boolean; query: string }) {
+  if (query && segment.text.toLowerCase().includes(query)) return <>{highlightText(segment.text, query)}</>
   if (!wordTiming || !segment.words?.length) return <>{segment.text}</>
   const active = activeWordIndex(segment.words, time)
   return <>{segment.words.map((word, index) => (
@@ -80,6 +83,11 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
   const [duration, setDuration] = useState(0)
   const [audioUrl, setAudioUrl] = useState('')
   const [documentMode, setDocumentMode] = useState<DocumentMode>('preview')
+  const [searchValue, setSearchValue] = useState(''), [searchIndex, setSearchIndex] = useState(0)
+  const query = useDeferredValue(searchValue.trim().toLowerCase())
+  const summaryView = useRef<HTMLDivElement>(null)
+  // Open on the summary when there is one, unless a link asked for a time or a version.
+  const openedFor = useRef<string | null>(null)
   const [editingMetadata, setEditingMetadata] = useState(false)
   const [activeSegment, setActiveSegment] = useState<string | null>(null)
   // TS-01: the scroll anchor is held separately from the highlight so a pause
@@ -181,11 +189,51 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
     setTranscriptDraft(recording.transcriptText ?? '')
   }, [recording, seedKey])
 
+  useEffect(() => {
+    if (!recording || openedFor.current === recording.id) return
+    openedFor.current = recording.id
+    if (!searchParams.has('t') && !searchParams.has('version') && (recording.summary || recording.summaryKeyPoints?.length)) setDocumentMode('summary')
+  }, [recording, searchParams])
+
   const displayText = selectedVersion?.fullText ?? recording?.transcriptText ?? ''
   // Playback updates the clock several times a second; parse Markdown only when the text changes.
   const transcriptMarkdown = useMemo(() => <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayText}</ReactMarkdown>, [displayText])
   const summary = recording?.summary
   const summaryMarkdown = useMemo(() => summary ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{summary}</ReactMarkdown> : null, [summary])
+  const hasSummary = Boolean(summary || recording?.summaryKeyPoints?.length || recording?.actionItems?.length)
+  // Searchable summary lines: the overview's Markdown flattened to text, then key points, action items and topics.
+  const summaryLines = useMemo<SummaryLine[]>(() => {
+    const lines: SummaryLine[] = []
+    const add = (section: string, items: string[] | undefined) => items?.forEach((text, index) => { if (text.trim()) lines.push({ id: `${section}-${index}`, section, text: text.trim() }) })
+    add('Summary', summary?.split('\n').map(line => line.replace(/^\s*(#+|>|[-*+]|\d+\.)\s*/, '').replace(/[*_`]/g, '').trim()))
+    add('Key points', recording?.summaryKeyPoints)
+    add('Action items', recording?.actionItems)
+    add('Topics', recording?.summaryTopics)
+    return lines
+  }, [summary, recording?.summaryKeyPoints, recording?.actionItems, recording?.summaryTopics])
+
+  const searchHits = useMemo(() => searchRecording(query, summaryLines, displaySegments), [query, summaryLines, displaySegments])
+  useEffect(() => setSearchIndex(0), [query])
+  /** Show a hit: summary lines are found in the rendered summary by text; transcript hits also move the audio there. */
+  const openHit = (index: number) => {
+    const hit = searchHits[index]
+    if (!hit) return
+    setSearchIndex(index)
+    const reveal = (element: Element | null | undefined) => {
+      if (!element) return
+      element.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+      element.classList.remove('search-flash'); void (element as HTMLElement).offsetWidth; element.classList.add('search-flash')
+    }
+    if (hit.kind === 'summary') {
+      setDocumentMode('summary')
+      requestAnimationFrame(() => reveal([...(summaryView.current?.querySelectorAll('p, li, h1, h2, h3, h4') ?? [])]
+        .find(element => (element.textContent ?? '').toLowerCase().includes(hit.line.text.toLowerCase().slice(0, 60)))))
+    } else {
+      setDocumentMode('timestamps')
+      seekTo(hit.segment.startTime, false)
+      requestAnimationFrame(() => reveal(document.getElementById(`segment-${hit.segment.id}`)))
+    }
+  }
   const sourceLabel = recording?.sourceProvider === 'plaud'
     ? 'Plaud Note Pro'
     : recording?.sourceProvider === 'opennotes' ? 'OpenPlod mobile' : 'Local import'
@@ -427,20 +475,35 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
       <div className="recording-workspace">
         <main className="document-pane">
           <div className="document-toolbar">
-            <ToggleGroup type="single" className="document-modes" value={documentMode} onValueChange={value => { if (value === 'preview' || value === 'edit' || value === 'timestamps' || value === 'studio') { if (value === 'edit') setSelectedVersion(null); setDocumentMode(value) } }} aria-label="Transcript view">
-              <ToggleGroupItem value="preview"><FileText />Markdown</ToggleGroupItem><ToggleGroupItem value="edit"><Pencil />Edit</ToggleGroupItem><ToggleGroupItem value="timestamps"><ListTree />Transcript</ToggleGroupItem><ToggleGroupItem value="studio"><Wand2 />Studio</ToggleGroupItem>
+            <ToggleGroup type="single" className="document-modes" value={documentMode} onValueChange={value => { if (value === 'summary' || value === 'preview' || value === 'edit' || value === 'timestamps' || value === 'studio') { if (value === 'edit') setSelectedVersion(null); setDocumentMode(value) } }} aria-label="Transcript view">
+              <ToggleGroupItem value="summary"><AlignLeft />Summary</ToggleGroupItem><ToggleGroupItem value="preview"><FileText />Markdown</ToggleGroupItem><ToggleGroupItem value="edit"><Pencil />Edit</ToggleGroupItem><ToggleGroupItem value="timestamps"><ListTree />Transcript</ToggleGroupItem><ToggleGroupItem value="studio"><Wand2 />Studio</ToggleGroupItem>
             </ToggleGroup>
             {documentMode === 'edit' && (
               <Button size="sm" onClick={() => void saveTranscript()} disabled={action !== null || recording.transcriptText === undefined}><Save />Save version</Button>
             )}
           </div>
 
+          <RecordingSearch value={searchValue} onChange={setSearchValue} query={query} hits={searchHits} current={searchIndex}
+            onStep={direction => openHit((searchIndex + direction + searchHits.length) % searchHits.length)} onOpen={openHit} />
+
           {selectedVersion && (
             <div className="version-banner"><History /><span>Viewing {selectedVersion.origin} version from {formatVersionDate(selectedVersion.createdAt)}</span><button type="button" onClick={() => setSelectedVersion(null)}>Back to current</button></div>
           )}
 
           <article className="document-surface">
-            {documentMode === 'studio' ? (
+            {documentMode === 'summary' ? (
+              hasSummary ? (
+                <div className="summary-document markdown-document" ref={summaryView}>
+                  {summaryMarkdown}
+                  {!!recording.summaryKeyPoints?.length && <><h2>Key points</h2><ul>{recording.summaryKeyPoints.map((point, index) => <li key={index}>{highlightText(point, query)}</li>)}</ul></>}
+                  {!!recording.actionItems?.length && <><h2>Action items</h2><ul className="summary-tasks">{recording.actionItems.map((item, index) => <li key={index}><input type="checkbox" disabled aria-label="Action item" />{highlightText(item, query)}</li>)}</ul></>}
+                  {!!recording.summaryTopics?.length && <p className="summary-topics"><strong>Topics:</strong> {highlightText(recording.summaryTopics.join(', '), query)}</p>}
+                  <div className="summary-regenerate"><Button variant="ghost" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <RotateCcw />}Summarize again</Button></div>
+                </div>
+              ) : (
+                <div className="inspector-empty summary-empty"><p>No summary yet.</p><Button variant="outline" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null || !recording.transcriptText}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <AlignLeft />}Generate summary</Button></div>
+              )
+            ) : documentMode === 'studio' ? (
               <TranscriptStudio recording={recording} onChanged={loadRecording} />
             ) : documentMode === 'edit' ? (
               recording.transcriptText !== undefined ? (
@@ -458,12 +521,12 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
                 </div>
                 <div className="segment-list">
                   {displaySegments.map((segment, index) => (
-                    <div key={segment.id} className="flex items-start gap-1" ref={index === followIndex ? activeRow : undefined}>
+                    <div key={segment.id} id={`segment-${segment.id}`} className="flex items-start gap-1" ref={index === followIndex ? activeRow : undefined}>
                     <button type="button" className={`flex-1 min-w-0 ${activeSegment === segment.id ? 'segment-row active' : 'segment-row'}`} onClick={() => seekTo(segment.startTime)}>
                       <span className={`speaker-mark speaker-${(speakerMap.get(segment.speaker) ?? 0) % 6}`} />
                       <span className="segment-time">{formatDuration(segment.startTime)}</span>
                       <span className="segment-copy"><strong>{segment.speaker}</strong>
-                        <SegmentCopy segment={segment} time={currentTime} wordTiming={wordTiming && activeSegment === segment.id} />
+                        <SegmentCopy segment={segment} time={currentTime} wordTiming={wordTiming && activeSegment === segment.id} query={query} />
                       </span>
                     </button>
                     {!selectedVersion && <SegmentEditor recording={recording} segment={segment} onSaved={loadRecording} />}
@@ -504,12 +567,6 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
             }} /></label>
           </section>
 
-          <section>
-            <div className="inspector-heading"><span>Summary</span><AlignLeft /></div>
-            {recording.summary ? <div className="inspector-summary">{summaryMarkdown}</div> : (
-              <div className="inspector-empty"><p>No summary yet.</p><Button variant="outline" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <AlignLeft />}Generate</Button></div>
-            )}
-          </section>
 
           <section>
             <div className="inspector-heading"><span>Version history</span><History /></div>

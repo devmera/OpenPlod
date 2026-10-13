@@ -3,6 +3,8 @@ use tauri::Manager;
 mod plaud;
 #[cfg(desktop)]
 mod desktop_exports;
+#[cfg(desktop)]
+mod menu_bar;
 
 #[cfg(desktop)]
 use std::{fs, net::UdpSocket, path::PathBuf};
@@ -122,9 +124,11 @@ fn start_service(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
   });
 
   app.manage(SidecarState(Mutex::new(Some(child))));
+  let origin = format!("http://127.0.0.1:{SERVICE_PORT}");
+  menu_bar::install(app.handle(), origin.clone(), pairing_token.clone())?;
   app.manage(RuntimeInfo {
     mode: "desktop",
-    service_origin: Some(format!("http://127.0.0.1:{SERVICE_PORT}")),
+    service_origin: Some(origin),
     pairing_token: Some(pairing_token),
     lan_address: local_lan_address(),
   });
@@ -152,6 +156,18 @@ pub fn run() {
       Ok(())
     });
 
+  // Closing the window keeps OpenPlod in the menu bar so background sync and
+  // meeting recording continue; Quit lives in the menu bar item.
+  #[cfg(desktop)]
+  let builder = builder.on_window_event(|window, event| {
+    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+      if window.label() == "main" {
+        api.prevent_close();
+        let _ = window.hide();
+      }
+    }
+  });
+
   #[cfg(desktop)]
   let builder = builder.invoke_handler(tauri::generate_handler![
     runtime_info, plaud::plaud_command, desktop_exports::export_document, desktop_exports::export_audio
@@ -163,6 +179,11 @@ pub fn run() {
     .build(tauri::generate_context!())
     .expect("error while building OpenPlod")
     .run(|_app_handle, _event| {
+      // Clicking the Dock icon brings back a window hidden by closing it.
+      #[cfg(target_os = "macos")]
+      if let RunEvent::Reopen { .. } = _event {
+        menu_bar::show_main(_app_handle);
+      }
       #[cfg(desktop)]
       if matches!(_event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
         if let Some(state) = _app_handle.try_state::<SidecarState>() {

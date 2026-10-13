@@ -1,4 +1,7 @@
-import { buildDownloadRequest, buildHandshake, buildSessionRequest, parseSessionPage, type PlaudSessionEntry } from './plaud-protocol';
+import {
+  buildDownloadRequest, buildHandshake, buildSessionRequest, buildUnlinkRequest, parseSessionPage, parseUnlinkResponse,
+  type PlaudSessionEntry,
+} from './plaud-protocol';
 
 export interface PlaudPackets {
   write(packet: Uint8Array): Promise<void>;
@@ -71,6 +74,30 @@ export class PlaudDownload {
     }
     return null;
   }
+}
+
+class UnlinkRejected extends Error { constructor(readonly status: number) { super(`status ${status}`); } }
+
+/**
+ * Sends the unlink request and waits for its reply. The recorder often drops the
+ * connection instead of replying (the SDK then reports success), so once the
+ * request is written a lost connection counts as sent, never as something to
+ * retry: reconnecting would let the now-unlinked recorder bind to this key again.
+ */
+export async function unlinkRecorder(connection: PlaudPackets): Promise<{ confirmed: boolean }> {
+  await connection.write(buildUnlinkRequest());
+  const deadline = Date.now() + 10000;
+  try {
+    while (Date.now() < deadline) {
+      const status = parseUnlinkResponse(await connection.packet(deadline - Date.now()));
+      if (status === null) continue;
+      if (status !== 0) throw new UnlinkRejected(status);
+      return { confirmed: true };
+    }
+  } catch (error) {
+    if (error instanceof UnlinkRejected) throw new Error(`The recorder refused to unlink (status ${error.status}).`);
+  }
+  return { confirmed: false };
 }
 
 export async function recordingHandshake(connection: PlaudPackets, token: string, protocol = 20) {

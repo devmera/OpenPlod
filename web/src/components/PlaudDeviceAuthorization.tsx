@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ChangeEvent } from 'react'
-import { Check, KeyRound, Loader2, ShieldCheck, Trash2 } from '@/components/icons'
+import { Check, KeyRound, Loader2, ShieldCheck, Trash2, Unplug } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { api, type PlaudIdentityStatus, type PlaudKeySource, type PlaudStatus } from '@/lib/api'
 import './plaud-device-authorization.css'
@@ -30,6 +30,7 @@ export function PlaudDeviceAuthorization({ status, onAuthorized, variant = 'page
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [confirmUnlink, setConfirmUnlink] = useState(false)
 
   const load = useCallback(async () => {
     try { setIdentity(await api.getPlaudIdentity()) } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not read the recorder authorization.') }
@@ -69,6 +70,20 @@ export function PlaudDeviceAuthorization({ status, onAuthorized, variant = 'page
     } finally { setBusy(false) }
   }
 
+  const unlink = async () => {
+    setBusy(true); setError(''); setNotice('')
+    try {
+      const result = await api.unlinkPlaudRecorder()
+      setConfirmUnlink(false)
+      setNotice(result.confirmed
+        ? 'The recorder is unlinked. Its recordings stayed on it; the key was kept as plaud-device.previous.json.'
+        : 'The unlink request was sent and the recorder disconnected, which is how it usually completes. The key was kept as plaud-device.previous.json.')
+      await load(); onAuthorized?.()
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not unlink the recorder.')
+    } finally { setBusy(false) }
+  }
+
   const forget = async () => {
     if (identity?.keySource === 'local' && !window.confirm('The recorder stays bound to this key, and the Plaud app cannot unlink it. The key will be moved to plaud-device.previous.json, not deleted. Continue?')) return
     setBusy(true); setError(''); setNotice('')
@@ -104,7 +119,16 @@ export function PlaudDeviceAuthorization({ status, onAuthorized, variant = 'page
       {identity.keySource === 'local' && <p>This key exists only in <code>{identity.identityPath}</code>. Include that file in your backups: without it, neither OpenPlod nor the Plaud app can reach the recorder.</p>}
       <div className="plaud-authorize-actions">
         <Button variant="outline" size="sm" disabled={busy} onClick={() => void forget()}>{busy ? <Loader2 className="animate-spin" /> : <Trash2 />}Remove authorization</Button>
+        <Button variant="outline" size="sm" disabled={busy || confirmUnlink} onClick={() => setConfirmUnlink(true)}><Unplug />Unlink this recorder</Button>
       </div>
+      {confirmUnlink && <div className="plaud-authorize-confirm" role="group" aria-label="Confirm unlinking">
+        <p>Unlinking removes this computer's key from the recorder, as Unlink does in the Plaud app. Recordings stay on the recorder, but they remain encrypted to this key: import them first. The recorder does not record again until OpenPlod or the Plaud app binds it to a key.</p>
+        <p>Wake the recorder, then unlink.</p>
+        <div className="plaud-authorize-actions">
+          <Button size="sm" disabled={busy} onClick={() => void unlink()}>{busy ? <Loader2 className="animate-spin" /> : <Unplug />}Unlink now</Button>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirmUnlink(false)}>Cancel</Button>
+        </div>
+      </div>}
     </> : <>
       <p>Your Note Pro only accepts downloads from a client it has authorized. Paste a Plaud sign-in token to authorize this computer.</p>
       {waitingForDevice

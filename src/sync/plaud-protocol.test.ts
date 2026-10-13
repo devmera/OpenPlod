@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { randomBytes } from 'node:crypto';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { buildDownloadRequest, buildHandshake, buildPreHandshakeChunks, buildSessionRequest,
-  parseNoteProAdvertisement, parseSessionPage, PLAUD_COMMAND, PlaudKeyChunks } from './plaud-protocol';
+  parseNoteProAdvertisement, parseSessionPage, PLAUD_COMMAND, PlaudKeyChunks, buildUnlinkRequest, parseUnlinkResponse } from './plaud-protocol';
 import { PlaudSessionCipher } from './plaud-session-cipher';
 
 describe('APK-verified Plaud framing', () => {
@@ -124,5 +124,15 @@ describe('Note Pro session encryption', () => {
     session.destroy();
     expect(() => session.encrypt(Buffer.from([1, 1, 0]))).toThrow();
     expect(() => session.decrypt(packet)).toThrow();
+  });
+});
+
+describe('unlink framing', () => {
+  test('builds only the keep-recordings depair and parses its reply', () => {
+    expect(buildUnlinkRequest().toString('hex')).toBe('01050000');
+    expect(parseUnlinkResponse(Buffer.from([1, 5, 0, 0]))).toBe(0);
+    expect(parseUnlinkResponse(Buffer.from([1, 5, 0]))).toBe(0);
+    expect(parseUnlinkResponse(Buffer.from([1, 5, 0, 2]))).toBe(2);
+    expect(parseUnlinkResponse(Buffer.from([1, 26, 0, 0]))).toBeNull();
   });
 });

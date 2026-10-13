@@ -46,6 +46,7 @@ import { Button } from "@/components/ui/button";
 import { api, type Recording } from "@/lib/api";
 import { formatDuration } from "@/lib/utils";
 import { BatchTranscribe } from '@/components/BatchTranscribe'
+import { useLibraryChanges } from "@/lib/library-changes";
 
 export function Dashboard() {
   const [recordings, setRecordings] = useState<Recording[]>([]),
@@ -115,34 +116,8 @@ export function Dashboard() {
       window.removeEventListener("plaud:sync-complete", load);
     };
   }, [load, invalidate]);
-  // Pick up recordings added by any source (meetings, mobile, imports) while the page is open.
-  useEffect(() => {
-    let version = "",
-      busy = false;
-    const check = async () => {
-      if (busy || document.hidden) return;
-      busy = true;
-      try {
-        const next = await api.getRecordingsVersion(retention);
-        if (version && next !== version) void load();
-        version = next;
-      } catch {
-        /* load() reports errors; keep probing. */
-      } finally {
-        busy = false;
-      }
-    };
-    void check();
-    const timer = window.setInterval(() => void check(), 5000);
-    const wake = () => void check();
-    document.addEventListener("visibilitychange", wake);
-    window.addEventListener("focus", wake);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", wake);
-      window.removeEventListener("focus", wake);
-    };
-  }, [retention, load]);
+  // New recordings, finished transcripts and summaries from any source appear without a manual reload.
+  useLibraryChanges(() => void load());
   const search = useDeferredValue(query.toLocaleLowerCase());
   const filtered = useMemo(
     () =>

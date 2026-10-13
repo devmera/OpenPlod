@@ -50,6 +50,16 @@ app.delete('/:id/bookmarks/:bookmarkId', c => { try { return c.json({ success: t
 // List Recordings
 // ============================================
 
+// A cheap fingerprint of everything the library pages show. Any recording added, removed, trashed,
+// re-titled or tagged (revision), transcribed (status, revision) or summarised (analyzed_at) changes it.
+app.get('/changes', c => {
+  const row = sqlite.query(`SELECT count(*) AS n, total(revision) AS revisions, group_concat(DISTINCT status) AS statuses,
+      sum(status IN ('pending', 'transcribing', 'summarizing')) AS working, sum(retention_state = 'trash') AS trashed,
+      (SELECT count(*) || ':' || coalesce(max(analyzed_at), '') FROM transcripts) AS analysed
+    FROM recordings`).get() as Record<string, unknown>;
+  return c.json({ success: true, data: { version: Object.values(row).join('|') } });
+});
+
 app.get('/', async (c) => {
   const requestedLimit = Number.parseInt(c.req.query('limit') || '20', 10);
   const requestedOffset = Number.parseInt(c.req.query('offset') || '0', 10);

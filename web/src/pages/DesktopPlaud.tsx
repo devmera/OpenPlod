@@ -10,6 +10,7 @@ import { PlaudDeviceAuthorization } from '@/components/PlaudDeviceAuthorization'
 import { PlaudSystemCheck } from '@/components/PlaudSystemCheck'
 import { api, type DashboardStats, type DeviceRecording, type PlaudStatus } from '@/lib/api'
 import { presenceLabel, usePlaudSyncStatus } from '@/lib/plaud-sync'
+import { libraryChanged } from '@/lib/library-changes'
 import './desktop-plaud.css'
 
 /** The page's three jobs: everyday transfer, one-time setup and diagnostics, and the cloud import. */
@@ -90,7 +91,8 @@ export function DesktopPlaud() {
   useEffect(() => {
     mounted.current = true; loadStats(); loadAuthorization()
     window.addEventListener('plaud:sync-complete', loadStats)
-    return () => { mounted.current = false; active.current?.abort(); window.removeEventListener('plaud:sync-complete', loadStats) }
+    window.addEventListener(libraryChanged, loadStats)
+    return () => { mounted.current = false; active.current?.abort(); window.removeEventListener('plaud:sync-complete', loadStats); window.removeEventListener(libraryChanged, loadStats) }
   }, [loadStats, loadAuthorization])
 
   const scan = async () => {

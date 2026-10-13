@@ -559,10 +559,10 @@ export const api = {
     return res.data.map(mapRecording)
   },
 
-  // Cheap change probe for the library: row count plus the newest row's id.
-  getRecordingsVersion: async (retention: string): Promise<string> => {
-    const res = await fetchJSON<ApiEnvelope<RawRecording[]> & { pagination: { total: number } }>(`/recordings?retention=${retention}&limit=1`)
-    return `${res.pagination.total}:${res.data[0]?.id ?? ''}`
+  // Fingerprint of the whole library; it changes whenever a recording, transcript or summary does.
+  getLibraryVersion: async (signal?: AbortSignal): Promise<string> => {
+    const res = await fetchJSON<ApiEnvelope<{ version: string }>>('/recordings/changes', { signal })
+    return res.data.version
   },
 
   getRecording: async (id: string): Promise<Recording> => {

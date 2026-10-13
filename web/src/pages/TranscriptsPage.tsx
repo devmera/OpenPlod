@@ -9,6 +9,7 @@ import { IconButton } from '@/components/ui/icon-button'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { SaveTranscriptDialog } from '@/components/NoteDialogs'
 import { api, type Recording, type TranscriptDocument } from '@/lib/api'
+import { useLibraryChanges } from '@/lib/library-changes'
 import { formatDuration, formatRelativeDate } from '@/lib/utils'
 import { exportDocument, recordingMarkdown, safeDocumentName } from '@/lib/document-export'
 import './transcripts.css'
@@ -51,6 +52,15 @@ export function TranscriptsPage() {
       .finally(() => { if (!cancelled) setReading(false) })
     return () => { cancelled = true }
   }, [chosen, refreshKey])
+  useLibraryChanges(() => {
+    const current = request.current
+    api.getTranscriptDocuments({ source, offset: 0 }).then(result => {
+      if (current !== request.current) return
+      const fresh = new Set(result.data.map(row => row.recordingId))
+      setDocuments(rows => [...result.data, ...rows.slice(result.data.length).filter(row => !fresh.has(row.recordingId))])
+    }).catch(() => { /* The visible list stays; the next change retries. */ })
+    if (chosen) api.getRecording(chosen).then(row => { if (current === request.current) setRecording(row) }).catch(() => {})
+  })
   const loadMore = async () => {
     if (loading) return
     const current = request.current

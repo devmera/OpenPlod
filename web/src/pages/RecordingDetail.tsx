@@ -42,6 +42,7 @@ import { TranscribeDialog } from '@/components/TranscribeDialog'
 import { RecordingBookmarks } from '@/components/RecordingBookmarks'
 import { SegmentEditor } from '@/components/SegmentEditor'
 import { api, speakerLabel, type Recording, type TranscriptSegment, type TranscriptVersion } from '@/lib/api'
+import { useLibraryChanges } from '@/lib/library-changes'
 import { formatDuration } from '@/lib/utils'
 import { exportDocument, exportOriginalAudio, recordingMarkdown, safeDocumentName as safeName } from '@/lib/document-export'
 import { deviceCommand, supportsPlaudDevice, vaultArguments } from '@/lib/plaud-device'
@@ -119,6 +120,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
     }
   }, [id])
 
+  useLibraryChanges(() => void loadRecording(false))
   useEffect(() => {
     setRecording(null); setVersions([]); setSelectedVersion(null); setLoading(true)
     lastVersionId.current = undefined

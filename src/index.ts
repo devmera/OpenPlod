@@ -288,6 +288,17 @@ async function startFolderSync() {
   watcher.startWatching();
   const result = await watcher.syncAll();
   console.log(`[Startup] Folder sync: ${result.added} added, ${result.skipped} skipped`);
+  // File events do not arrive for files another device writes to a network share (e.g. the iOS
+  // companion uploading to a NAS mounted over SMB), so rescan every minute; known files are skipped
+  // by size and modification time without being read again.
+  setInterval(async () => {
+    try {
+      const [enabled] = await db.select({ value: userSettings.value }).from(userSettings).where(eq(userSettings.key, 'autoImport')).limit(1);
+      if (enabled?.value !== 'true') return;
+      const rescan = await watcher.syncAll();
+      if (rescan.added) console.log(`[Folder] Rescan: ${rescan.added} added`);
+    } catch (error) { console.error('[Folder] Rescan failed:', error); }
+  }, 60000).unref();
 }
 
 void startFolderSync().catch(error => console.error('[Startup] Folder sync failed:', error));

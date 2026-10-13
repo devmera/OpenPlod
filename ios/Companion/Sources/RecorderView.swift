@@ -6,6 +6,9 @@ struct RecorderView: View {
     @State private var recordings: [RecorderFile] = []
     @State private var busy: String?
     @State private var message: String?
+    @State private var destination = Destination.load()
+    @State private var editingDestination = false
+    @StateObject private var engine = SyncEngine()
 
     var body: some View {
         NavigationStack {
@@ -16,6 +19,22 @@ struct RecorderView: View {
                         Button { run("Reading recorder…") { recordings = try await listRecordings(key: key, device: nil, timeoutSecs: 20) } }
                             label: { Label("List recordings", systemImage: "list.bullet") }
                     } footer: { status }
+                    Section {
+                        if let destination {
+                            LabeledContent("NAS", value: URL(string: destination.url)?.host() ?? destination.url)
+                            Button { Task { await engine.sync(key: key, destination: destination) } } label: {
+                                Label(engine.running ? "Syncing…" : "Sync now", systemImage: "arrow.triangle.2.circlepath")
+                            }.disabled(engine.running)
+                        }
+                        Button(destination == nil ? "Set up NAS" : "Change NAS") { editingDestination = true }
+                    } header: { Text("Upload") } footer: { if let summary = engine.summary { Text(summary) } }
+                    if !engine.items.isEmpty {
+                        Section("This sync") {
+                            ForEach(engine.items) { item in
+                                LabeledContent(Date(timeIntervalSince1970: TimeInterval(item.id)).formatted(date: .abbreviated, time: .shortened)) { phase(item.phase) }
+                            }
+                        }
+                    }
                     if !recordings.isEmpty {
                         Section("On the recorder (\(recordings.count))") {
                             ForEach(recordings, id: \.sessionId) { file in
@@ -30,9 +49,20 @@ struct RecorderView: View {
                 }
                 .navigationTitle("OpenPlod")
                 .disabled(busy != nil)
+                .sheet(isPresented: $editingDestination) { DestinationView { saved in destination = saved } }
             } else {
                 LinkView { linked in key = linked }
             }
+        }
+    }
+
+    @ViewBuilder private func phase(_ phase: SyncEngine.Phase) -> some View {
+        switch phase {
+        case .waiting: Text("Waiting").foregroundStyle(.secondary)
+        case .downloading: Label("Downloading", systemImage: "arrow.down.circle")
+        case .uploading: Label("Uploading", systemImage: "arrow.up.circle")
+        case .done: Label("On NAS", systemImage: "checkmark.circle").foregroundStyle(.green)
+        case .failed(let reason): Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(.red).lineLimit(2)
         }
     }
 

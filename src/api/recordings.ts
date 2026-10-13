@@ -37,6 +37,7 @@ import {
 } from '../library/recording-library';
 import { forwardRecording } from '../library/forwarding';
 import { queueRecordingProcessing } from '../library/processing';
+import { playbackFile } from '../library/playback-copy';
 
 const app = new Hono();
 let bookmarkStore: RecordingBookmarks | undefined;
@@ -717,11 +718,12 @@ app.get('/:id/audio', async (c) => {
     const [recording] = await db.select().from(recordings).where(eq(recordings.id, id)).limit(1);
     if (!recording) return c.json({ success: false, error: 'Not found' }, 404);
 
-    const filePath = recording.filePath;
-    const file = Bun.file(filePath);
-    if (!await file.exists()) {
+    if (!await Bun.file(recording.filePath).exists()) {
       return c.json({ success: false, error: 'File not found' }, 404);
     }
+    // `?playback=1` serves an AAC copy of formats whose timeline drifts in WebKit; the default is the original.
+    const filePath = c.req.query('playback') === '1' ? await playbackFile(recording.id, recording.filePath) : recording.filePath;
+    const file = Bun.file(filePath);
 
     const ext = filePath.split('.').pop()?.toLowerCase();
     const mimeTypes: Record<string, string> = {

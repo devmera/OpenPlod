@@ -67,6 +67,20 @@ export function folderProvenance(audioPath: string): RecordingProvenance {
 /** NAS recycle bins (Synology `#recycle`, `@eaDir`) and hidden folders are never imported. */
 const skippedFolder = (name: string) => name.startsWith('#') || name.startsWith('@') || name.startsWith('.');
 const insideSkippedFolder = (relativePath: string) => relativePath.split(/[\\/]/).slice(0, -1).some(skippedFolder);
+/** Audio length via ffprobe, so imported files show their duration before they are transcribed. */
+async function probeDurationMs(path: string): Promise<number | undefined> {
+  try {
+    const child = Bun.spawn(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', path], { stdout: 'pipe', stderr: 'ignore' });
+    const timer = setTimeout(() => child.kill(), 15000);
+    const output = await new Response(child.stdout).text();
+    clearTimeout(timer);
+    if (await child.exited !== 0) return undefined;
+    const seconds = Number(output.trim());
+    return Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds * 1000) : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export class FolderWatcher {
   private syncPath: string | null;
@@ -157,8 +171,10 @@ export class FolderWatcher {
     this.pendingFiles.add(filePath);
 
     try {
+      const durationMs = await probeDurationMs(filePath);
       const imported = await importRecordingFile({
         sourcePath: filePath,
+        ...(durationMs ? { metadata: { durationMs } } : {}),
         provenance: folderProvenance(filePath),
       });
       if (!imported.added) {

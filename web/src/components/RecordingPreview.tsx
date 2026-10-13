@@ -33,6 +33,8 @@ import {
 import { loadWaveform } from '@/lib/audio-loader';
 import { useLibraryChanges } from "@/lib/library-changes";
 import { describeExport, obsidianApi } from '@/lib/obsidian';
+import { ProcessingState } from '@/components/ProcessingState';
+import { useProcessing } from '@/lib/processing';
 import { IconButton } from './ui/icon-button';
 import { PlaybackSpeedMenu } from './PlaybackSpeedMenu';
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
@@ -91,6 +93,7 @@ export function RecordingPreview({
   // A transcript or summary finishing elsewhere shows up here without reopening the recording.
   const [libraryVersion, setLibraryVersion] = useState(0);
   useLibraryChanges(() => setLibraryVersion(value => value + 1));
+  const processing = useProcessing(recording);
   useEffect(() => {
     let disposed = false;
     api
@@ -546,6 +549,8 @@ export function RecordingPreview({
                 {recording.transcriptText}
               </ReactMarkdown>
             </div>
+          ) : processing ? (
+            <ProcessingState processing={processing} compact />
           ) : (
             <div className="preview-empty">
               <FileAudio />

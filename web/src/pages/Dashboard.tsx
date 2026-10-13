@@ -49,6 +49,8 @@ import { api, type Recording } from "@/lib/api";
 import { formatDuration } from "@/lib/utils";
 import { BatchTranscribe } from '@/components/BatchTranscribe'
 import { useLibraryChanges } from "@/lib/library-changes";
+import { ProcessingChip } from '@/components/ProcessingState';
+import { useProcessingStages } from '@/lib/processing';
 
 export function Dashboard() {
   const [recordings, setRecordings] = useState<Recording[]>([]),
@@ -123,6 +125,7 @@ export function Dashboard() {
   // Plaud recordings still transferring show as rows above the library, in the views they will land in.
   const allTransfers = usePlaudTransfers(() => void load());
   const transfers = retention === "active" && !starred && ["all", "plaud"].includes(source) ? allTransfers : [];
+  const stages = useProcessingStages(recordings);
   const search = useDeferredValue(query.toLocaleLowerCase());
   const filtered = useMemo(
     () =>
@@ -391,7 +394,7 @@ export function Dashboard() {
                     <strong>{row.title}</strong>
                   </button>
                   <div className="studio-row-tags">
-                    {(row.tags.filter((tag) => tag !== "Starred").length
+                    {stages.get(row.id) ? <ProcessingChip stage={stages.get(row.id)!} /> : (row.tags.filter((tag) => tag !== "Starred").length
                       ? row.tags.filter((tag) => tag !== "Starred")
                       : [
                           row.sourceProvider === "plaud"

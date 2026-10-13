@@ -44,6 +44,8 @@ import { SegmentEditor } from '@/components/SegmentEditor'
 import { SpeakerBar } from '@/components/SpeakerBar'
 import { RecordingSearch } from '@/components/RecordingSearch'
 import { highlightText, searchRecording, type SummaryLine } from '@/lib/recording-search'
+import { ProcessingState } from '@/components/ProcessingState'
+import { useProcessing, type Processing } from '@/lib/processing'
 import { api, speakerLabel, type Recording, type TranscriptSegment, type TranscriptVersion } from '@/lib/api'
 import { useLibraryChanges } from '@/lib/library-changes'
 import { formatDuration } from '@/lib/utils'
@@ -90,6 +92,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
   const summaryView = useRef<HTMLDivElement>(null)
   // Open on the summary when there is one, unless a link asked for a time or a version.
   const openedFor = useRef<string | null>(null)
+  const processing = useProcessing(recording)
   const [editingMetadata, setEditingMetadata] = useState(false)
   const [activeSegment, setActiveSegment] = useState<string | null>(null)
   // TS-01: the scroll anchor is held separately from the highlight so a pause
@@ -522,7 +525,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
             ) : documentMode === 'edit' ? (
               recording.transcriptText !== undefined ? (
                 <textarea className="markdown-editor" aria-label="Transcript Markdown" value={transcriptDraft} onChange={event => setTranscriptDraft(event.target.value)} spellCheck />
-              ) : <TranscriptEmpty action={action} onTranscribe={() => void runAction('transcribing')} />
+              ) : <TranscriptEmpty action={action} onTranscribe={() => void runAction('transcribing')} processing={processing} />
             ) : documentMode === 'timestamps' ? (
               displaySegments.length ? (
                 <>
@@ -558,10 +561,10 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
                   ))}
                 </div>
                 </>
-              ) : displayText ? <p className="p-6 text-sm text-muted-foreground">This transcript version has no timestamp data. Its text is available in Markdown.</p> : <TranscriptEmpty action={action} onTranscribe={() => void runAction('transcribing')} />
+              ) : displayText ? <p className="p-6 text-sm text-muted-foreground">This transcript version has no timestamp data. Its text is available in Markdown.</p> : <TranscriptEmpty action={action} onTranscribe={() => void runAction('transcribing')} processing={processing} />
             ) : displayText ? (
               <div className="markdown-document">{transcriptMarkdown}</div>
-            ) : <TranscriptEmpty action={action} onTranscribe={() => void runAction('transcribing')} />}
+            ) : <TranscriptEmpty action={action} onTranscribe={() => void runAction('transcribing')} processing={processing} />}
           </article>
         </main>
 
@@ -618,7 +621,8 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
   )
 }
 
-function TranscriptEmpty({ action, onTranscribe }: { action: BusyAction; onTranscribe: () => void }) {
+function TranscriptEmpty({ action, onTranscribe, processing }: { action: BusyAction; onTranscribe: () => void; processing?: Processing | null }) {
+  if (processing) return <ProcessingState processing={processing} />
   return (
     <div className="document-empty">
       <FileText />

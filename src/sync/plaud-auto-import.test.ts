@@ -18,3 +18,30 @@ test('automatic import requires opt-in and stable recordings, deduplicates and r
     const previousCalls = calls; await automatic.tick(); expect(calls).toBe(previousCalls);
   } finally { db.close(); }
 });
+
+test('a settled listing imports a finished recording in the same round and reports the sync', async () => {
+  const db = new Database(':memory:');
+  try {
+    db.exec('CREATE TABLE user_settings(key TEXT PRIMARY KEY,value TEXT); CREATE TABLE recordings(id TEXT,source_provider TEXT,source_recording_id TEXT)');
+    const listed: (number | undefined)[] = [];
+    const imports: number[] = [];
+    const automatic = new PlaudAutoImport(db, {
+      configured: () => true,
+      list: async (options?: { settleMs?: number }) => {
+        listed.push(options?.settleMs);
+        return { serial: 'device', checkedAt: '2026-10-13T12:00:00.000Z', stable: [4],
+          sessions: [{ sessionId: 4, size: 2000, scene: 0, timezone: 0 }, { sessionId: 5, size: 900, scene: 0, timezone: 0 }] };
+      },
+      import: async (sessionId: number) => {
+        imports.push(sessionId);
+        db.query('INSERT INTO recordings VALUES(?,?,?)').run(`id-${sessionId}`, 'plaud', `device:${sessionId}`);
+        return { added: true, durationMs: 1000, sourceRetained: true, recording: { id: `id-${sessionId}`, filePath: 'test', originalFilename: 'test', fingerprint: 'test', sourceRecordingId: `device:${sessionId}` } };
+      },
+    });
+    automatic.set(true);
+    await automatic.tick({ settleMs: 3000 });
+    expect(listed).toEqual([3000]);
+    expect(imports).toEqual([4]); // 5 was still growing during the settle pause
+    expect(automatic.status().lastSync).toEqual({ at: '2026-10-13T12:00:00.000Z', imported: 1 });
+  } finally { db.close(); }
+});

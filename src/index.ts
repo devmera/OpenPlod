@@ -18,7 +18,7 @@ import { createOrganizerApi } from './api/organizer';
 import { apiAccess } from './api/access';
 import { RecordingAi } from './organizer/recording-ai';
 import { createRecordingAiApi } from './api/recording-ai';
-import { automaticPlaud } from './api/plaud';
+import { automaticPlaud, plaudWatcher } from './api/plaud';
 import { recordings, userSettings } from './db/schema';
 import { eq } from 'drizzle-orm';
 import { searchTranscripts } from './search/transcripts';
@@ -271,7 +271,9 @@ async function startFolderSync() {
 }
 
 void startFolderSync().catch(error => console.error('[Startup] Folder sync failed:', error));
-setInterval(() => { void automaticPlaud.tick(); }, 60000).unref();
+// Sync when the recorder's beacon is heard; poll only where the bridge cannot listen (the Swift fallback).
+plaudWatcher.start();
+setInterval(() => { if (!plaudWatcher.active()) void automaticPlaud.tick(); }, 60000).unref();
 // 30-day Trash retention must hold for a long-running server too, not only at startup.
 function purgeTrash() {
   try { organizer.purgeExpired(); } catch (error) { console.error('[Retention] Note trash purge failed:', error); }

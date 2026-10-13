@@ -7,6 +7,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { db, sqlite } from '../db/client';
 import { PlaudAutoImport } from '../sync/plaud-auto-import';
+import { PlaudWatcher } from '../sync/plaud-watch';
 import { recordings, userSettings } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import { configuredSyncPath, fingerprintFile, importRecordingFile, incomingDirectory, safeFilename } from '../library/recording-library';
@@ -31,7 +32,11 @@ import {
 const app = new Hono();
 app.use('*', bodyLimit({ maxSize: 16384 }));
 export const automaticPlaud = new PlaudAutoImport(sqlite);
-app.get('/auto-import', c => c.json({ success: true, data: automaticPlaud.status() }));
+export const plaudWatcher = new PlaudWatcher(automaticPlaud);
+const syncStatus = () => ({ ...automaticPlaud.status(), watch: plaudWatcher.status() });
+app.get('/auto-import', c => c.json({ success: true, data: syncStatus() }));
+// "Sync now": immediately when the recorder is in range, otherwise at its next beacon.
+app.post('/auto-import/sync', c => { plaudWatcher.requestSync(); return c.json({ success: true, data: syncStatus() }); });
 app.patch('/auto-import', async c => {
   try { const input = await c.req.json(); if (typeof input.enabled !== 'boolean') throw new Error('Import preference must be true or false.');
     return c.json({ success: true, data: automaticPlaud.set(input.enabled) }); }

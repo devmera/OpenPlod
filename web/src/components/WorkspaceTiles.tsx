@@ -51,12 +51,12 @@ export function WorkspaceTiles() {
         </div>
         <ChevronRight className="tile-arrow" />
       </Link>
-      <Link className="workspace-tile" to="/transcripts">
+      <Link className="workspace-tile" to="/settings">
         <span className="tile-illustration tile-ai">
           <AudioLines />
         </span>
         <div>
-          <strong>Transcripts</strong>
+          <strong>Transcription</strong>
           <p>{engine ? `Powered by ${{ mistral: 'Mistral', whisper: 'local Whisper', deepgram: 'Deepgram', openai: 'OpenAI', assemblyai: 'AssemblyAI' }[engine]}` : 'Transcription settings'}</p>
         </div>
         <ChevronRight className="tile-arrow" />

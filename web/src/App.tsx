@@ -9,7 +9,6 @@ const DevicesPage = lazy(() => import('@/pages/DevicesPage').then(module => ({ d
 
 const Dashboard = lazy(() => import('@/pages/Dashboard').then(module => ({ default: module.Dashboard })))
 const RecordingDetail = lazy(() => import('@/pages/RecordingDetail').then(module => ({ default: module.RecordingDetail })))
-const TranscriptsPage = lazy(() => import('@/pages/TranscriptsPage').then(module => ({ default: module.TranscriptsPage })))
 const NotesPage = lazy(() => import('@/pages/NotesPage').then(module => ({ default: module.NotesPage })))
 const AiPage = lazy(() => import('@/pages/AiPage').then(module => ({ default: module.AiPage })))
 const AndroidPage = lazy(() => import('@/pages/AndroidPage').then(module => ({ default: module.AndroidPage })))
@@ -41,12 +40,13 @@ export default function App() {
               <Route path="/developer" element={<DeveloperPage />} />
               <Route path="/recording/:id" element={<RecordingDetail />} />
               <Route path="/record" element={<RecordingPage />} />
-              <Route path="/transcripts" element={<TranscriptsPage />} />
+              {/* Transcripts live on each recording; old links land in the library. */}
+              <Route path="/transcripts" element={<Navigate to="/recordings" replace />} />
               <Route path="/notes" element={<NotesPage />} />
               <Route path="/ai" element={<AiPage />} />
               <Route path="/android" element={<AndroidPage />} />
-              <Route path="/transcripts/:id" element={<RecordingDetail backPath="/transcripts" />} />
-              <Route path="/search" element={<Navigate to="/transcripts" replace />} />
+              <Route path="/transcripts/:id" element={<RecordingDetail backPath="/recordings" />} />
+              <Route path="/search" element={<Navigate to="/recordings" replace />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
           </Routes>

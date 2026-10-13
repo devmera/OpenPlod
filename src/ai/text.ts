@@ -25,11 +25,11 @@ export async function installedOllamaModels(fetcher: Fetcher = fetch): Promise<s
 /**
  * Ollama's default context is a few thousand tokens and it silently drops the start of a longer
  * prompt, so size it to the request: about three characters per token plus the reply, rounded up to
- * a power of two between 8k and 32k tokens. Longer input is refused upstream (100 KB analysis limit).
+ * a power of two between 8k and 64k tokens. Longer input is refused upstream (100 KB analysis, 120 KB chat).
  */
 export function ollamaContext(messages: TextMessage[], maxTokens: number): number {
   const needed = Math.ceil(messages.reduce((total, message) => total + message.content.length, 0) / 3) + maxTokens + 512;
-  return Math.min(32768, Math.max(8192, 2 ** Math.ceil(Math.log2(needed))));
+  return Math.min(65536, Math.max(8192, 2 ** Math.ceil(Math.log2(needed))));
 }
 
 export async function completeText(selection: TextSelection, messages: TextMessage[], options: { signal?: AbortSignal; timeoutMs?: number; maxTokens?: number; json?: boolean } = {}, fetcher: Fetcher = fetch): Promise<TextResult> {

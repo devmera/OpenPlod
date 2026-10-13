@@ -15,6 +15,7 @@ async function plaudRequest<T>(path: string, body?: unknown, method?: string): P
   return result.data
 }
 type Enrollment = { id: string; name: string; code: string; expiresAt: number; state: string }
+type ApprovedPhone = { id: string; name: string; code: string; serial: string; approvedAt: string }
 type AutoImportStatus = { enabled: boolean; running: boolean; lastChecked: string | null; error: string | null; events: { id: number; recordingId: string; createdAt: string }[] }
 export function DesktopImportPreferences() {
   const [state, setState] = useState<AutoImportStatus | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false)
@@ -67,18 +68,34 @@ export function PhoneAuthorization({ onDone }: { onDone: () => void }) {
 
 export function DesktopAuthorizations({ inline = false }: { inline?: boolean }) {
   const [requests, setRequests] = useState<Enrollment[]>([])
+  const [phones, setPhones] = useState<ApprovedPhone[]>([])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
   useEffect(() => {
     let stopped = false
-    const poll = async () => { try { const rows = await plaudRequest<Enrollment[]>('/authorizations'); if (!stopped) setRequests(rows.filter(r => r.state === 'pending')) } catch (e) { if (!stopped) setError((e as Error).message) } }
+    const poll = async () => {
+      try {
+        const [rows, approved] = await Promise.all([plaudRequest<Enrollment[]>('/authorizations'), plaudRequest<ApprovedPhone[]>('/approved-phones')])
+        if (!stopped) { setRequests(rows.filter(r => r.state === 'pending')); setPhones(approved) }
+      } catch (e) { if (!stopped) setError((e as Error).message) }
+    }
     void poll(); const timer = setInterval(() => void poll(), 5000)
     return () => { stopped = true; clearInterval(timer) }
   }, [])
   const act = async (request: Enrollment, approve: boolean) => {
     setBusy(request.id); setError('')
     // Approving confirms the code the user compared on both screens; a request from another device shows a different code.
-    try { await plaudRequest(`/authorizations/${request.id}${approve ? '/approve' : ''}`, approve ? { confirm: true, code: request.code } : undefined, approve ? 'POST' : 'DELETE'); setRequests(rows => rows.filter(r => r.id !== request.id)) }
+    try {
+      await plaudRequest(`/authorizations/${request.id}${approve ? '/approve' : ''}`, approve ? { confirm: true, code: request.code } : undefined, approve ? 'POST' : 'DELETE')
+      setRequests(rows => rows.filter(r => r.id !== request.id))
+      if (approve) setPhones(await plaudRequest<ApprovedPhone[]>('/approved-phones'))
+    }
+    catch (e) { setError((e as Error).message) } finally { setBusy('') }
+  }
+  const forget = async (phone: ApprovedPhone) => {
+    if (!window.confirm(`Remove "${phone.name}" from this list? This does not take the recorder key back: unlink the phone in its app to remove it there.`)) return
+    setBusy(phone.id); setError('')
+    try { await plaudRequest(`/approved-phones/${phone.id}`, undefined, 'DELETE'); setPhones(rows => rows.filter(row => row.id !== phone.id)) }
     catch (e) { setError((e as Error).message) } finally { setBusy('') }
   }
   return <section className="device-section" aria-label="Phone authorizations">
@@ -90,6 +107,15 @@ export function DesktopAuthorizations({ inline = false }: { inline?: boolean }) 
       <Button size="sm" title="Approve phone" disabled={!!busy} onClick={() => void act(request, true)}><Check />Codes match</Button>
       <Button size="icon" variant="ghost" title="Decline phone" aria-label="Decline phone" disabled={!!busy} onClick={() => void act(request, false)}><X /></Button>
     </div>)}
+    {phones.length > 0 && <div className="approved-phones">
+      <h3>Approved phones</h3>
+      {phones.map(phone => <div key={phone.id} className="device-recording-row">
+        <span><strong>{phone.name}</strong><small>Approved {new Date(phone.approvedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })} · code {phone.code}</small></span>
+        <ShieldCheck className="approved-phone-icon" aria-label="Has recorder access" />
+        <Button size="icon" variant="ghost" title="Remove from list" aria-label={`Remove ${phone.name} from list`} disabled={!!busy} onClick={() => void forget(phone)}><X /></Button>
+      </div>)}
+      <p className="device-muted">Each approved phone holds its own copy of the recorder key until it is unlinked in the phone app.</p>
+    </div>}
     {error && <p className="device-error" role="alert">{error}</p>}
   </section>
 }

@@ -3,10 +3,12 @@ import { z } from 'zod';
 import type { PlaudIdentity } from './plaud-connection';
 
 type Identity = PlaudIdentity & { serial: string; bindingToken: string };
+/** What is kept about a phone after approval: enough to recognise it, nothing secret. */
+export type ApprovedPhone = { id: string; name: string; code: string; serial: string; approvedAt: string };
 type Request = { id: string; name: string; code: string; publicKey: string; expiresAt: number; envelope?: { iv: string; wrappedKey: string; ciphertext: string } };
 export class PlaudEnrollment {
   private requests = new Map<string, Request>();
-  constructor(private identity: () => Promise<Identity>, private now = () => Date.now()) {}
+  constructor(private identity: () => Promise<Identity>, private now = () => Date.now(), private onApproved?: (phone: ApprovedPhone) => void) {}
   private cleanup() { for (const [id, request] of this.requests) if (request.expiresAt <= this.now()) this.requests.delete(id); }
   create(input: unknown) {
     this.cleanup();
@@ -35,6 +37,7 @@ export class PlaudEnrollment {
       const wrappedKey = publicEncrypt({ key: createPublicKey({ key: Buffer.from(r.publicKey, 'base64'), format: 'der', type: 'spki' }), oaepHash: 'sha1' }, key);
       if (r.expiresAt <= this.now() || !this.requests.has(id)) throw new Error('Authorization request expired.');
       r.envelope = { iv: iv.toString('base64'), ciphertext: ciphertext.toString('base64'), wrappedKey: wrappedKey.toString('base64') };
+      this.onApproved?.({ id: r.id, name: r.name, code: r.code, serial: source.serial, approvedAt: new Date(this.now()).toISOString() });
       return this.public(r);
     } finally { key.fill(0); }
   }

@@ -537,3 +537,8 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 
 /* The code a phone shows while requesting the recorder key; compared on both screens. */
 .phone-approval-code { border: 1px solid var(--border); border-radius: 6px; background: var(--secondary); padding: 6px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 18px; font-weight: 600; letter-spacing: 0.18em; }
+
+/* Phones approved for recorder access, under the pairing controls. */
+.approved-phones { display: grid; gap: 4px; margin-top: 18px; }
+.approved-phones h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--muted-foreground); }
+.approved-phone-icon { width: 18px; height: 18px; color: var(--success, #22c55e); }

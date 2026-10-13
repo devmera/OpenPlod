@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import * as Switch from '@radix-ui/react-switch'
-import { Check, Download, FileText, KeyRound, Loader2, Settings2, ShieldCheck, Smartphone, Speech, X } from "@/components/icons"
+import { Check, Download, FileText, KeyRound, Loader2, RefreshCw, Settings2, ShieldCheck, Smartphone, Speech, X } from "@/components/icons"
 import { Button } from './ui/button'
-import { api, type Settings } from '@/lib/api'
+import { api, type PlaudSyncStatus, type Settings } from "@/lib/api"
 import { apiUrl, authenticatedHeaders } from '@/lib/runtime'
 import { deviceCommand, vaultArguments } from '@/lib/plaud-device'
 
@@ -15,7 +15,7 @@ async function plaudRequest<T>(path: string, body?: unknown, method?: string): P
   return result.data
 }
 type Enrollment = { id: string; name: string; code: string; expiresAt: number; state: string }
-type AutoImportStatus = { enabled: boolean; running: boolean; lastChecked: string | null; error: string | null; events: { id: number; recordingId: string; createdAt: string }[] }
+type AutoImportStatus = PlaudSyncStatus
 export function DesktopImportPreferences() {
   const [state, setState] = useState<AutoImportStatus | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const [settings, setSettings] = useState<Settings | null>(null)
@@ -23,23 +23,31 @@ export function DesktopImportPreferences() {
   useEffect(() => {
     let stopped = false
     const poll = async () => { try { const next = await plaudRequest<AutoImportStatus>('/auto-import'); if (!stopped) setState(next) } catch (e) { if (!stopped) setError((e as Error).message) } }
-    void poll(); const timer = setInterval(() => void poll(), 10000); return () => { stopped = true; clearInterval(timer) }
+    void poll(); const timer = setInterval(() => void poll(), 4000); return () => { stopped = true; clearInterval(timer) }
   }, [])
   const toggle = async (enabled: boolean) => {
     setBusy(true); setError('')
     try { setState(await plaudRequest<AutoImportStatus>('/auto-import', { enabled }, 'PATCH')) } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+  }
+  const syncNow = async () => {
+    setError('')
+    try { setState(await api.syncPlaudNow()) } catch (e) { setError((e as Error).message) }
   }
   const updateProcessing = async (key: 'autoTranscribe' | 'autoSummarize', enabled: boolean) => {
     setBusy(true); setError('')
     try { setSettings(await api.updateSettings({ [key]: enabled })) } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
   return <section className="device-section plaud-preferences"><div className="device-section-heading"><Settings2 /><h2>Import preferences</h2></div>
-    <label className="plaud-preference-row"><Download /><span><strong>Automatically import new recordings</strong><small>Check every minute while OpenPlod is running</small></span><Switch.Root className="plaud-switch" aria-label="Automatically import new recordings" checked={state?.enabled || false} disabled={busy || !state} onCheckedChange={enabled => void toggle(enabled)}><Switch.Thumb /></Switch.Root></label>
+    <label className="plaud-preference-row"><Download /><span><strong>Automatically import new recordings</strong><small>Syncs when your Note Pro is nearby, at most every 2 minutes, while OpenPlod runs (also from the menu bar)</small></span><Switch.Root className="plaud-switch" aria-label="Automatically import new recordings" checked={state?.enabled || false} disabled={busy || !state} onCheckedChange={enabled => void toggle(enabled)}><Switch.Thumb /></Switch.Root></label>
     <div className="plaud-preference-row"><ShieldCheck /><span><strong>Keep originals on device</strong><small>Direct imports never delete Plaud audio</small></span><Check className="plaud-positive" aria-label="Always retained" /></div>
     <label className="plaud-preference-row"><Speech /><span><strong>Transcribe after import</strong><small>{settings?.openWhistleForwarding ? 'Processing is managed by OpenWhistle' : 'Use your configured transcription provider'}</small></span><Switch.Root className="plaud-switch" aria-label="Transcribe after import" checked={settings?.autoTranscribe || false} disabled={busy || !settings || settings.openWhistleForwarding} onCheckedChange={enabled => void updateProcessing('autoTranscribe', enabled)}><Switch.Thumb /></Switch.Root></label>
     <label className="plaud-preference-row"><FileText /><span><strong>Summarize after transcription</strong><small>Generate an AI summary when transcription finishes</small></span><Switch.Root className="plaud-switch" aria-label="Summarize after transcription" checked={settings?.autoSummarize || false} disabled={busy || !settings || settings.openWhistleForwarding} onCheckedChange={enabled => void updateProcessing('autoSummarize', enabled)}><Switch.Thumb /></Switch.Root></label>
     {state?.running && <p role="status" className="device-muted">Checking and importing recordings...</p>}
-    {state?.lastChecked && <p className="device-muted">Last checked {new Date(state.lastChecked).toLocaleTimeString()}</p>}
+    {state?.enabled && <div className="plaud-sync-line">
+      <p className="device-muted">{state.running ? 'Syncing now…' : state.lastSync ? `Last synced ${new Date(state.lastSync.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} · ${state.lastSync.imported ? `${state.lastSync.imported} new` : 'nothing new'}` : state.lastChecked ? `Last checked ${new Date(state.lastChecked).toLocaleTimeString()}` : 'Waiting for your Note Pro'}</p>
+      <Button size="sm" variant="outline" disabled={busy || state.running} onClick={() => void syncNow()}>{state.running ? <Loader2 className="animate-spin" /> : <RefreshCw />}{state.watch?.syncPending ? 'Waiting for Note Pro' : 'Sync now'}</Button>
+    </div>}
+    {state?.skipped ? <p className="device-muted">{state.skipped} recording{state.skipped === 1 ? ' was' : 's were'} made under a key this computer does not hold and {state.skipped === 1 ? 'is' : 'are'} not imported.</p> : null}
     {(error || state?.error) && <p className="device-error" role="alert">{error || state?.error}</p>}
     {state?.events.slice(0, 3).map(event => <p className="device-muted" key={event.id}>Saved to vault / {new Date(event.createdAt).toLocaleString()}</p>)}
   </section>

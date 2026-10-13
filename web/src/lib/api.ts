@@ -378,6 +378,19 @@ export interface MeetingStatus {
   recent: { recordingId: string; title: string; app: string | null; durationSeconds: number; importedAt: string }[]
 }
 
+/** Background sync state: the listener, the last round, and any problem. */
+export interface PlaudSyncStatus {
+  enabled: boolean
+  running: boolean
+  lastChecked: string | null
+  lastSync: { at: string; imported: number } | null
+  error: string | null
+  /** Recordings on the recorder that no key held here can decrypt (reported, not an error). */
+  skipped?: number
+  events: { id: number; recordingId: string; createdAt: string }[]
+  watch?: { watching: boolean; inRange: boolean; lastSeenAt: string | null; rssi: number | null; syncPending: boolean }
+}
+
 interface ApiEnvelope<T> {
   success: boolean
   data: T
@@ -727,6 +740,15 @@ export const api = {
   getDeviceRecordings: async (signal?: AbortSignal): Promise<DeviceRecording[]> => {
     const res = await fetchJSON<ApiEnvelope<DeviceRecording[]>>('/plaud/device-recordings', { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(150000)]) : AbortSignal.timeout(150000) })
     return res.data
+  },
+  getPlaudSyncStatus: async (signal?: AbortSignal): Promise<PlaudSyncStatus> =>
+    (await fetchJSON<ApiEnvelope<PlaudSyncStatus>>('/plaud/auto-import', { signal: signal ?? AbortSignal.timeout(5000) })).data,
+  syncPlaudNow: async (): Promise<PlaudSyncStatus> =>
+    (await fetchJSON<ApiEnvelope<PlaudSyncStatus>>('/plaud/auto-import/sync', { method: 'POST' })).data,
+  /** The recorder's list from the last background sync; null before the first round. No Bluetooth. */
+  getCachedDeviceRecordings: async (): Promise<{ sessions: DeviceRecording[]; checkedAt: string } | null> => {
+    const res = await fetchJSON<ApiEnvelope<DeviceRecording[] | null> & { checkedAt: string | null }>('/plaud/device-recordings?cached=1', { signal: AbortSignal.timeout(10000) })
+    return res.data && res.checkedAt ? { sessions: res.data, checkedAt: res.checkedAt } : null
   },
   importDeviceRecording: async (sessionId: number, signal?: AbortSignal): Promise<string> => {
     const start = await fetchJSON<ApiEnvelope<{ id: string }>>('/plaud/device-import', {

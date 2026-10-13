@@ -110,11 +110,30 @@ async fn adapter() -> Result<Adapter, String> {
 }
 
 fn normalize_identifier(value: &str) -> String {
-    value
+    let normalized = value
         .chars()
         .filter(|character| character.is_ascii_alphanumeric())
         .collect::<String>()
-        .to_ascii_lowercase()
+        .to_ascii_lowercase();
+    // An all-zero address identifies nothing: it is what CoreBluetooth reports for
+    // every peripheral, and older identities may have stored it.
+    if normalized.chars().all(|character| character == '0') {
+        String::new()
+    } else {
+        normalized
+    }
+}
+
+/// The identifier this platform can find the peripheral by again: the BD_ADDR on
+/// BlueZ and WinRT, the CoreBluetooth UUID on macOS (which hides the address and
+/// reports `00:00:00:00:00:00` for every peripheral).
+fn peripheral_identifier(peripheral: &Peripheral) -> String {
+    let address = peripheral.address();
+    if address.into_inner() == [0; 6] {
+        peripheral.id().to_string().to_ascii_uppercase()
+    } else {
+        address.to_string()
+    }
 }
 
 /// How strongly a peripheral looks like a recorder: 2 when it carries the Note Pro
@@ -174,7 +193,7 @@ async fn find_peripheral(
             .map_err(|error| format!("Bluetooth scan failed: {error}"))?;
         for peripheral in peripherals {
             if !target.is_empty()
-                && normalize_identifier(&peripheral.address().to_string()) == target
+                && normalize_identifier(&peripheral_identifier(&peripheral)) == target
             {
                 exact = Some(peripheral);
                 break 'outer;
@@ -262,7 +281,7 @@ async fn run_scan() -> Result<(), String> {
             "detail": "No advertising Plaud found. Wake the device and keep it near this computer.",
         }),
         Some(peripheral) => {
-            let address = peripheral.address().to_string();
+            let address = peripheral_identifier(&peripheral);
             let properties = peripheral.properties().await.ok().flatten();
             let name = properties
                 .as_ref()

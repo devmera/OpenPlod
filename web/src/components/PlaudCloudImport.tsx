@@ -173,7 +173,7 @@ export function PlaudCloudImport() {
       {status && <p className="device-muted">{status.totals.count} recordings / {bytes(status.totals.bytes)} — {status.totals.importedCount} already in the vault{status.totals.trashCount ? `, ${status.totals.trashCount} in Trash` : ''}.</p>}
 
       {running && job && <div className="plaud-cloud-progress" role="status">
-        <div className="plaud-cloud-progress-head"><span><Loader2 className="animate-spin" />Importing {job.completed} / {job.total}{job.current ? ` — ${job.current}` : ''}</span><small>{job.totalBytes ? `${Math.round(job.receivedBytes / job.totalBytes * 100)}%` : ''}</small></div>
+        <div className="plaud-cloud-progress-head"><span><Loader2 className="animate-spin" />Importing {job.completed} / {job.total}{job.current ? ` — ${job.current}` : ''}</span><small>{job.totalBytes ? `${Math.min(100, Math.round(job.receivedBytes / job.totalBytes * 100))}%` : ''}</small></div>
         {job.totalBytes > 0 && <div className="plaud-cloud-bar"><i style={{ width: `${Math.min(100, Math.round(job.receivedBytes / job.totalBytes * 100))}%` }} /></div>}
         <Button variant="ghost" size="sm" onClick={() => void cancel()}><X />Cancel</Button>
       </div>}

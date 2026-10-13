@@ -144,6 +144,8 @@ struct RecorderView: View {
                                 get: { expanded == item.id },
                                 set: { open in player.stop(); expanded = open ? item.id : nil })) {
                                 InlinePlayer(item: item, player: player)
+                                    // The player belongs to the row above it: no lines around it.
+                                    .listRowSeparator(.hidden)
                             } label: { row(item) }
                         }
                     }
@@ -168,6 +170,8 @@ struct RecorderView: View {
                 .frame(width: 36, height: 36).background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.date.formatted(date: .omitted, time: .shortened)).font(.body.monospacedDigit())
+                    // Separators between recordings start where the text does, as in iOS lists.
+                    .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
                 Text(ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file)).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()

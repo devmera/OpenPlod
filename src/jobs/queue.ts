@@ -40,6 +40,8 @@ export class JobQueue {
         job.error = job.status === 'failed' ? 'Interrupted during processing. Provider outcome may be unknown; check usage before retrying.' : undefined;
         this.persist(job);
         // Otherwise the recording would show "transcribing" forever after a crash.
+        if (job.status === 'failed' && job.type === 'summarize-recording') database.query("UPDATE recordings SET status='complete' WHERE id=? AND status IN ('pending','summarizing')")
+          .run(String((job.data as { recordingId?: unknown }).recordingId));
         if (job.status === 'failed' && job.type === 'process-recording') database.query("UPDATE recordings SET status='failed', error_message=? WHERE id=? AND retention_state='active'")
           .run(job.error!, String((job.data as { recordingId?: unknown }).recordingId));
       }
@@ -68,6 +70,7 @@ export class JobQueue {
     job.status = 'cancelled'; job.completedAt = new Date();
     job.error = job.checkpoint?.remoteId ? 'Local polling cancelled. Remote processing may continue.' : 'Cancelled. Any submitted provider request may still be billed.';
     if (job.type === 'process-recording') this.database.query("UPDATE recordings SET status='failed',error_message='Processing cancelled.' WHERE id=? AND retention_state='active'").run(String((job.data as any).recordingId));
+    if (job.type === 'summarize-recording') this.database.query("UPDATE recordings SET status='complete' WHERE id=? AND status IN ('pending','summarizing')").run(String((job.data as any).recordingId));
     this.persist(job); this.controllers.get(id)?.abort(); return true;
   }
   resume(id: string) {

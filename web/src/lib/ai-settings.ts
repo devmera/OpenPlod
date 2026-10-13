@@ -3,7 +3,7 @@ import type { speechCapabilities } from '../../../src/ai/capabilities'
 import { apiUrl, authenticatedHeaders } from './runtime'
 export type { AiConfig, SpeechProvider, TextProvider }
 export type AiSettings = AiConfig & { credentials: Record<string, boolean>; capabilities: typeof speechCapabilities }
-export type ProcessingJob = { id: string; recordingId: string; provider?: string; status: string; error?: string; priority: number; checkpoint?: { phase: string; remoteId?: string } }
+export type ProcessingJob = { id: string; type?: string; recordingId: string; provider?: string; status: string; error?: string; priority: number; checkpoint?: { phase: string; remoteId?: string } }
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(apiUrl(path), { method, headers: authenticatedHeaders({ 'Content-Type': 'application/json' }), ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(15000) })
   const payload = await response.json()

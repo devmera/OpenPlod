@@ -53,6 +53,22 @@ console.log('[Transcription] Engines:', Object.entries(engineStatus).map(([k, v]
 // Register job handlers
 // ============================================
 
+// A summary asked for from the app runs as a queued job, so it continues after leaving the page and the
+// recording shows "summarizing" meanwhile. A failure is kept on the recording for the app to show.
+jobQueue.register('summarize-recording', async (data: any) => {
+  const { recordingId } = data as { recordingId: string };
+  await db.update(recordings).set({ status: 'summarizing', errorMessage: null }).where(eq(recordings.id, recordingId));
+  try {
+    const { recordingAnalyzer } = await import('./analysis/analyzer');
+    await recordingAnalyzer.analyze(recordingId, true);
+    await db.update(recordings).set({ status: 'complete', errorMessage: null }).where(eq(recordings.id, recordingId));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Summary failed.';
+    await db.update(recordings).set({ status: 'complete', errorMessage: `Summary failed: ${message}` }).where(eq(recordings.id, recordingId));
+    throw error;
+  }
+});
+
 jobQueue.register('process-recording', async (data: any, job) => {
   const { recordingId, filePath } = data;
   try {

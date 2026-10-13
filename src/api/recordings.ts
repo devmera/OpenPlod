@@ -820,6 +820,18 @@ app.get('/stats/summary', async (c) => {
 // Analyze Recording
 // ============================================
 
+app.post('/:id/summarize', async (c) => {
+  const id = c.req.param('id');
+  const [recording] = await db.select().from(recordings).where(eq(recordings.id, id)).limit(1);
+  const [transcript] = await db.select({ text: transcripts.fullText }).from(transcripts).where(eq(transcripts.recordingId, id)).limit(1);
+  if (!recording || recording.retentionState !== 'active') return c.json({ success: false, error: 'Active recording not found' }, 404);
+  if (!transcript?.text.trim()) return c.json({ success: false, error: 'Transcribe the recording before summarizing it.' }, 400);
+  // Waits behind running transcriptions; a recording being transcribed keeps that status until its turn.
+  if (['complete', 'failed'].includes(recording.status)) await db.update(recordings).set({ status: 'pending', errorMessage: null }).where(eq(recordings.id, id));
+  const job = await jobQueue.add('summarize-recording', { recordingId: id });
+  return c.json({ success: true, data: { jobId: job.id } }, 202);
+});
+
 app.post('/:id/analyze', async (c) => {
   const id = c.req.param('id');
   try {

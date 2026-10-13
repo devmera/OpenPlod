@@ -82,7 +82,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
   const [duration, setDuration] = useState(0)
   const [audioUrl, setAudioUrl] = useState('')
   const [documentMode, setDocumentMode] = useState<DocumentMode>('preview')
-  const processing = useProcessing(recording)
+  const processing = useProcessing(recording, () => void loadRecording())
   const [editingMetadata, setEditingMetadata] = useState(false)
   const [activeSegment, setActiveSegment] = useState<string | null>(null)
   // TS-01: the scroll anchor is held separately from the highlight so a pause
@@ -228,8 +228,9 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
     setAction(nextAction)
     setError('')
     try {
+        // Queued in the background: the page shows progress and reloads when it is done.
         await api.summarize(id)
-        await loadRecording()
+        await loadRecording(false)
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : 'Action failed')
     } finally {
@@ -510,7 +511,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
           <section>
             <div className="inspector-heading"><span>Summary</span><AlignLeft /></div>
             {recording.summary ? <div className="inspector-summary">{summaryMarkdown}</div> : (
-              processing ? <ProcessingState processing={processing} compact /> : <div className="inspector-empty"><p>No summary yet.</p><Button variant="outline" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <AlignLeft />}Generate</Button></div>
+              processing ? <ProcessingState processing={processing} compact /> : <div className="inspector-empty"><p>{recording.errorMessage?.startsWith('Summary failed') ? recording.errorMessage : 'No summary yet.'}</p><Button variant="outline" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <AlignLeft />}Generate</Button></div>
             )}
           </section>
 

@@ -10,6 +10,8 @@ export interface Recording {
   recordedAt: string
   createdAt: string
   status: 'pending' | 'transcribing' | 'summarizing' | 'complete' | 'failed'
+  /** Why the last processing step failed, e.g. "Summary failed: …" on a recording that is otherwise complete. */
+  errorMessage?: string | null
   transcriptText?: string
   /** Set by list endpoints, which do not include the transcript itself. */
   hasTranscript?: boolean
@@ -393,6 +395,7 @@ interface RawRecording {
   recordedAt?: string | null
   uploadedAt?: string | null
   status?: Recording['status']
+  errorMessage?: string | null
   transcript?: RawTranscript | null
   hasTranscript?: boolean
   sourceProvider?: string | null
@@ -475,6 +478,7 @@ function mapRecording(r: RawRecording): Recording {
     recordedAt: r.recordedAt || r.uploadedAt || '',
     createdAt: r.uploadedAt || '',
     status: r.status || 'pending',
+    errorMessage: r.errorMessage ?? null,
     transcriptText: transcript?.fullText,
     hasTranscript: r.hasTranscript ?? Boolean(transcript?.fullText?.trim()),
     transcriptOrigin: transcript?.origin,
@@ -531,8 +535,9 @@ export const api = {
     await fetchJSON(`/recordings/${id}/reprocess`, { method: 'POST', ...(options ? { body: JSON.stringify(options) } : {}) })
   },
 
+  /** Queues a summary; it runs in the background and the recording shows "summarizing" meanwhile. */
   summarize: async (id: string): Promise<void> => {
-    await fetchJSON(`/recordings/${id}/analyze`, { method: 'POST' })
+    await fetchJSON(`/recordings/${id}/summarize`, { method: 'POST' })
   },
 
   search: async (query: string, signal?: AbortSignal): Promise<SearchResult[]> => {

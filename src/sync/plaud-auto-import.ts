@@ -1,12 +1,16 @@
 import type { Database } from 'bun:sqlite';
 import { plaudTransfers } from './plaud-transfers';
-import { directPlaudConfigured, importDirectPlaudRecording, readDirectPlaudRecordings } from './plaud-direct';
+import { directPlaudConfigured, heldKeysSignature, importDirectPlaudRecording, readDirectPlaudRecordings } from './plaud-direct';
 
 export class PlaudAutoImport {
   private running = false;
   private previous = new Map<string, number>();
-  /** Recordings that cannot be decrypted with any key held here; not downloaded again this session. */
+  /**
+   * Recordings that cannot be decrypted with any key held here. Remembered across restarts, so they
+   * are not downloaded again, until the keys held here change.
+   */
   private unreadable = new Set<string>();
+  private unreadableKeys = '';
   private skipped = 0;
   private lastChecked: string | null = null;
   private error: string | null = null;
@@ -15,8 +19,17 @@ export class PlaudAutoImport {
   private lastSync: { at: string; imported: number } | null = null;
   /** The recorder's list from the last background round, so the UI can show it without connecting. */
   lastListing: { serial: string; checkedAt: string; sessions: { sessionId: number; size: number; scene: number; timezone: number }[] } | null = null;
-  constructor(private database: Database, private adapter = { configured: directPlaudConfigured, list: readDirectPlaudRecordings, import: importDirectPlaudRecording }) {
-    database.exec(`CREATE TABLE IF NOT EXISTS plaud_import_events (id INTEGER PRIMARY KEY AUTOINCREMENT, recording_id TEXT NOT NULL, created_at TEXT NOT NULL);`);
+  constructor(private database: Database, private adapter: { configured: () => boolean; list: typeof readDirectPlaudRecordings; import: typeof importDirectPlaudRecording; keys?: () => string } =
+    { configured: directPlaudConfigured, list: readDirectPlaudRecordings, import: importDirectPlaudRecording, keys: heldKeysSignature }) {
+    database.exec(`CREATE TABLE IF NOT EXISTS plaud_import_events (id INTEGER PRIMARY KEY AUTOINCREMENT, recording_id TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS plaud_unreadable (source TEXT PRIMARY KEY, keys TEXT NOT NULL, created_at TEXT NOT NULL);`);
+  }
+  /** Load the remembered verdicts that still apply to the keys held now. */
+  private syncUnreadable() {
+    const keys = this.adapter.keys?.() ?? '';
+    if (keys === this.unreadableKeys && this.unreadable.size) return;
+    this.unreadableKeys = keys;
+    this.unreadable = new Set((this.database.query('SELECT source FROM plaud_unreadable WHERE keys = ?').all(keys) as { source: string }[]).map(row => row.source));
   }
   enabled() { return (this.database.query("SELECT value FROM user_settings WHERE key='directPlaudAutoImport'").get() as { value: string } | null)?.value === 'true'; }
   set(enabled: boolean) {
@@ -36,6 +49,7 @@ export class PlaudAutoImport {
     this.running = true;
     let imported = 0;
     try {
+      this.syncUnreadable();
       const result = await this.adapter.list(options.settleMs ? { settleMs: options.settleMs } : undefined); this.lastChecked = result.checkedAt;
       const settled = result.stable ? new Set(result.stable) : null;
       this.lastListing = { serial: result.serial, checkedAt: result.checkedAt, sessions: result.sessions };
@@ -59,6 +73,8 @@ export class PlaudAutoImport {
           // One recording made under another key must not block the ones after it.
           if (!/cannot be decrypted here/.test(error instanceof Error ? error.message : '')) throw error;
           this.unreadable.add(source);
+          plaudTransfers.finish(session.sessionId); // counted as skipped on the device page, not shown as a failed transfer
+          this.database.query('INSERT OR REPLACE INTO plaud_unreadable(source, keys, created_at) VALUES(?, ?, ?)').run(source, this.unreadableKeys, new Date().toISOString());
           continue;
         }
         if (outcome.added || outcome.recording.sourceRecordingId === source) existing.add(source);

@@ -31,6 +31,18 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSBluetoothAlwaysUsageDescription: >-
           OpenPlod connects to your Plaud recorder over Bluetooth to copy your recordings.
+        NSCameraUsageDescription: >-
+          OpenPlod reads the pairing QR code shown by OpenPlod on your Mac.
+        NSLocalNetworkUsageDescription: >-
+          OpenPlod contacts OpenPlod on your Mac once, to receive the recorder key.
+        # OpenPlod on the Mac serves plain HTTP on the local network (or Tailscale), authenticated by
+        # its pairing token; the recorder key itself travels end-to-end encrypted.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSExceptionDomains:
+            ts.net:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.openplod.companion
@@ -40,3 +52,4 @@ targets:
         embed: false
       - sdk: CoreBluetooth.framework
       - sdk: Security.framework
+      - sdk: VisionKit.framework

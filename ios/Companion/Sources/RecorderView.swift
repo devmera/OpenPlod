@@ -1,45 +1,50 @@
 import SwiftUI
 
-/// First screen: find Plaud recorders nearby. Linking a key and syncing come next.
+/// Main screen: the linked recorder and what it holds. Uploading to your NAS comes next.
 struct RecorderView: View {
-    @State private var recorders: [NearbyRecorder] = []
-    @State private var scanning = false
+    @State private var key: RecorderKey? = KeyStore.load()
+    @State private var recordings: [RecorderFile] = []
+    @State private var busy: String?
     @State private var message: String?
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    Button {
-                        Task { await scanNearby() }
-                    } label: {
-                        Label(scanning ? "Scanning…" : "Scan for recorders", systemImage: "dot.radiowaves.left.and.right")
-                    }
-                    .disabled(scanning)
-                } footer: {
-                    if let message { Text(message) }
-                }
-                if !recorders.isEmpty {
-                    Section("Nearby") {
-                        ForEach(recorders, id: \.id) { recorder in
-                            LabeledContent(recorder.name ?? "Plaud recorder", value: recorder.rssi.map { "\($0) dBm" } ?? "")
+            if let key {
+                List {
+                    Section {
+                        LabeledContent("Recorder", value: key.serial)
+                        Button { run("Reading recorder…") { recordings = try await listRecordings(key: key, device: nil, timeoutSecs: 20) } }
+                            label: { Label("List recordings", systemImage: "list.bullet") }
+                    } footer: { status }
+                    if !recordings.isEmpty {
+                        Section("On the recorder (\(recordings.count))") {
+                            ForEach(recordings, id: \.sessionId) { file in
+                                LabeledContent(Date(timeIntervalSince1970: TimeInterval(file.sessionId)).formatted(date: .abbreviated, time: .shortened),
+                                               value: ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file))
+                            }
                         }
                     }
+                    Section {
+                        Button("Unlink this phone", role: .destructive) { KeyStore.remove(); self.key = nil; recordings = [] }
+                    } footer: { Text("Removes the recorder key from this phone only. The recorder and your Mac are not changed.") }
                 }
+                .navigationTitle("OpenPlod")
+                .disabled(busy != nil)
+            } else {
+                LinkView { linked in key = linked }
             }
-            .navigationTitle("OpenPlod")
         }
     }
 
-    private func scanNearby() async {
-        scanning = true
-        message = nil
-        defer { scanning = false }
-        do {
-            recorders = try await scan(seconds: 8)
-            if recorders.isEmpty { message = "No Plaud recorder found. Wake it and keep it close." }
-        } catch {
-            message = error.localizedDescription
+    @ViewBuilder private var status: some View {
+        if let busy { Text(busy) } else if let message { Text(message) }
+    }
+
+    private func run(_ label: String, _ work: @escaping () async throws -> Void) {
+        busy = label; message = nil
+        Task {
+            do { try await work() } catch { message = error.localizedDescription }
+            busy = nil
         }
     }
 }

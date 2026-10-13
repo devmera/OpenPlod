@@ -20,8 +20,27 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>ts.net</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>OpenPlod connects to your Plaud recorder over Bluetooth to copy your recordings.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>OpenPlod reads the pairing QR code shown by OpenPlod on your Mac.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>OpenPlod contacts OpenPlod on your Mac once, to receive the recorder key.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

@@ -7,8 +7,11 @@ import type { Database } from 'bun:sqlite';
 
 const localDateTime = (iso: string) => new Date(iso).toLocaleString('sv-SE', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 
+/** Whether the text still has parts of Plaud's template to complete. */
+export const isPlaudTemplate = (text: string) => text.includes('$[') || /\[(Speaker \d+|Insert [^\]]*)\]/.test(text);
+
 export function completePlaudSummary(text: string, context: { recordedAt: string | null; speakerNames: Map<number, string> }): string {
-  if (!text.includes('$[') && !/\[(Speaker \d+|Insert [^\]]*)\]/.test(text)) return text;
+  if (!isPlaudTemplate(text)) return text;
   return text
     .replace(/\$\[audio_start_time\]/g, context.recordedAt ? localDateTime(context.recordedAt) : 'unknown')
     .replace(/\$\[[a-z_]+\]/g, '')
@@ -42,7 +45,8 @@ export function plaudSpeakerNames(sqlite: Database, recordingId: string): Map<nu
 
 /** The stored summary with Plaud's template parts completed, in whichever shape it was stored. */
 export function presentSummary<T>(sqlite: Database, recordingId: string, recordedAt: string | null, summary: T): T {
-  const complete = (text: string) => completePlaudSummary(text, { recordedAt, speakerNames: plaudSpeakerNames(sqlite, recordingId) });
+  // Speaker names are looked up only for summaries that still carry Plaud's template.
+  const complete = (text: string) => isPlaudTemplate(text) ? completePlaudSummary(text, { recordedAt, speakerNames: plaudSpeakerNames(sqlite, recordingId) }) : text;
   if (typeof summary === 'string') return complete(summary) as T;
   if (summary && typeof summary === 'object' && typeof (summary as { overview?: unknown }).overview === 'string')
     return { ...summary, overview: complete((summary as unknown as { overview: string }).overview) };

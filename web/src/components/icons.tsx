@@ -77,6 +77,7 @@ export const ArrowRight = glyph('ArrowRight', <path d="M3 12h18m-7-7 7 7-7 7" />
 export const ArrowUp = glyph('ArrowUp', <path d="M12 21V3m-7 7 7-7 7 7" />)
 export const ArrowUpRight = glyph('ArrowUpRight', <path d="M4 20 20 4M8 4h12v12" />)
 export const ChevronDown = glyph('ChevronDown', <path d="m5 8 7 7 7-7" />)
+export const ChevronUp = glyph('ChevronUp', <path d="m5 16 7-7 7 7" />)
 export const ChevronLeft = glyph('ChevronLeft', <path d="m15 5-7 7 7 7" />)
 export const ChevronRight = glyph('ChevronRight', <path d="m9 5 7 7-7 7" />)
 export const RefreshCw = glyph('Refresh', <><path d="M20 9a8.5 8.5 0 0 0-15-4M4 15a8.5 8.5 0 0 0 15 4M20 3v6h-6M4 21v-6h6" /></>)

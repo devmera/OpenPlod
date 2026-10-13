@@ -16,6 +16,8 @@ export interface Recording {
   transcriptOrigin?: 'generated' | 'edited'
   transcriptVersionId?: string | null
   summary?: string
+  summaryKeyPoints?: string[]
+  summaryTopics?: string[]
   actionItems?: string[]
   speakers?: string[]
   segments?: TranscriptSegment[]
@@ -425,7 +427,7 @@ interface RawTranscript {
   origin?: 'generated' | 'edited'
   currentVersionId?: string | null
   segments?: RawTranscriptSegment[] | string
-  summary?: { overview?: string } | string
+  summary?: { overview?: string; keyPoints?: string[]; topics?: string[] } | string
   extractedTasks?: Array<string | { title?: string }>
 }
 
@@ -527,6 +529,8 @@ function mapRecording(r: RawRecording): Recording {
     transcriptOrigin: transcript?.origin,
     transcriptVersionId: transcript?.currentVersionId,
     summary: transcript?.summary ? (typeof transcript.summary === 'string' ? transcript.summary : transcript.summary.overview) : undefined,
+    summaryKeyPoints: typeof transcript?.summary === 'object' ? transcript.summary.keyPoints?.filter(Boolean) : undefined,
+    summaryTopics: typeof transcript?.summary === 'object' ? transcript.summary.topics?.filter(Boolean) : undefined,
     actionItems: transcript?.extractedTasks
       ?.map(item => typeof item === 'string' ? item : item.title)
       .filter((item): item is string => Boolean(item)),

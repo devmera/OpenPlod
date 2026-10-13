@@ -16,7 +16,7 @@ export class RecordingImportConflict extends Error {}
 export type RecordingProvenance = {
   sourceProvider: 'plaud' | 'opennotes' | 'upload' | 'meeting';
   sourceRecordingId?: string | null;
-  sourceTransport: 'export' | 'folder' | 'mobile' | 'upload' | 'ble' | 'cloud' | 'capture';
+  sourceTransport: 'export' | 'folder' | 'mobile' | 'upload' | 'ble' | 'cloud' | 'capture' | 'phone';
   recordedAt?: string | null;
 };
 

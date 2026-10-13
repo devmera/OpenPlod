@@ -77,6 +77,28 @@ describe('recording library', () => {
     expect(recordings.every(recording => recording.size > 0)).toBe(true);
   });
 
+  test('a phone upload with its sidecar keeps the recorder source id and start time', async () => {
+    const shared = join(testRoot, 'nas-share');
+    mkdirSync(shared, { recursive: true });
+    const sidecar = { type: 'openplod-recording', version: 1, sourceProvider: 'plaud', sourceRecordingId: '8810ABCDEF012345:1791898280', recordedAt: '2026-10-13T13:31:20.000Z' };
+    writeFileSync(join(shared, 'Plaud-1791898280.ogg'), 'phone-audio');
+    writeFileSync(join(shared, 'Plaud-1791898280.ogg.openplod.json'), JSON.stringify(sidecar));
+    writeFileSync(join(shared, 'unrelated.wav'), 'plain-audio');
+    writeFileSync(join(shared, 'unrelated.wav.openplod.json'), '{"type":"something-else"}');
+
+    const watcher = new FolderWatcher(shared);
+    expect(await watcher.syncAll()).toMatchObject({ added: 2, errors: [] });
+    const [phone] = await db.select().from(recordings).where(eq(recordings.sourceRecordingId, sidecar.sourceRecordingId));
+    expect(phone).toMatchObject({ sourceProvider: 'plaud', sourceTransport: 'phone', recordedAt: sidecar.recordedAt });
+    const [plain] = await db.select().from(recordings).where(eq(recordings.originalFilename, 'unrelated.wav'));
+    expect(plain).toMatchObject({ sourceTransport: 'folder', sourceRecordingId: null });
+
+    // The same recording, also fetched by the Mac's own Bluetooth sync, is not stored twice.
+    writeFileSync(join(testRoot, 'mac-copy.m4a'), 'different-bytes-same-recording');
+    const again = await importRecordingFile({ sourcePath: join(testRoot, 'mac-copy.m4a'), provenance: { sourceProvider: 'plaud', sourceTransport: 'ble', sourceRecordingId: sidecar.sourceRecordingId } });
+    expect(again).toMatchObject({ added: false, recording: { id: phone.id } });
+  });
+
   test('reports a missing Plaud export folder as not configured', async () => {
     const watcher = new FolderWatcher(join(testRoot, 'missing-plaud-folder'));
 

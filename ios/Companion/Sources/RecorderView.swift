@@ -6,7 +6,8 @@ struct RecorderView: View {
     @State private var destination = Destination.load()
     @State private var showingSettings = false
     @State private var editingDestination = false
-    @State private var playing: SyncEngine.LibraryItem?
+    @State private var expanded: UInt32?
+    @StateObject private var player = AudioPlayer()
     @ObservedObject private var engine = SyncEngine.shared
     @ObservedObject private var beacon = BeaconWake.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -48,7 +49,6 @@ struct RecorderView: View {
                     SettingsView(onUnlinked: { self.key = nil }, onDestinationChanged: { destination = $0 })
                 }
                 .sheet(isPresented: $editingDestination) { DestinationView { destination = $0 } }
-                .sheet(item: $playing) { item in PlayerView(item: item).presentationDetents([.medium]) }
                 .task(id: engine.recorderRecording) {
                     // While recording, check every 30 s whether it stopped, then sync.
                     while engine.recorderRecording && scenePhase == .active && !Task.isCancelled {
@@ -134,8 +134,17 @@ struct RecorderView: View {
             ForEach(days, id: \.0) { day, items in
                 Section(day) {
                     ForEach(items) { item in
-                        Button { playing = item } label: { row(item) }.foregroundStyle(.primary)
+                        VStack(spacing: 0) {
+                            Button {
+                                withAnimation(.snappy) {
+                                    player.stop()
+                                    expanded = expanded == item.id ? nil : item.id
+                                }
+                            } label: { row(item) }
+                            .buttonStyle(.plain)
                             .disabled(item.place == .otherKey)
+                            if expanded == item.id { InlinePlayer(item: item, player: player).transition(.opacity) }
+                        }
                     }
                 }
             }
@@ -154,7 +163,7 @@ struct RecorderView: View {
 
     private func row(_ item: SyncEngine.LibraryItem) -> some View {
         HStack(spacing: 14) {
-            Image(systemName: "play.fill").font(.body.weight(.medium)).foregroundStyle(.tint)
+            Image(systemName: expanded == item.id && player.playing ? "speaker.wave.2.fill" : "play.fill").font(.body.weight(.medium)).foregroundStyle(.tint)
                 .frame(width: 36, height: 36).background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.date.formatted(date: .omitted, time: .shortened)).font(.body.monospacedDigit())
@@ -164,6 +173,7 @@ struct RecorderView: View {
             badge(item.place)
         }
         .padding(.vertical, 2)
+        .contentShape(Rectangle())
     }
 
     private func badge(_ place: SyncEngine.LibraryItem.Place) -> some View {

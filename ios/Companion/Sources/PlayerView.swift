@@ -52,53 +52,61 @@ final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 }
 
-struct PlayerView: View {
+/// The player shown inside an expanded recording row.
+struct InlinePlayer: View {
     let item: SyncEngine.LibraryItem
-    @StateObject private var player = AudioPlayer()
+    @ObservedObject var player: AudioPlayer
     @State private var loading = true
     @State private var failure: String?
 
     var body: some View {
-        VStack(spacing: 22) {
-            VStack(spacing: 4) {
-                Text(item.date.formatted(date: .complete, time: .omitted)).font(.subheadline).foregroundStyle(.secondary)
-                Text(item.date.formatted(date: .omitted, time: .shortened)).font(.title2.weight(.semibold))
-            }
+        Group {
             if loading {
-                ProgressView("Fetching from your NAS…").frame(maxHeight: .infinity)
+                HStack(spacing: 10) { ProgressView(); Text("Preparing audio…").font(.subheadline).foregroundStyle(.secondary) }
+                    .frame(maxWidth: .infinity, minHeight: 60)
             } else if let failure {
-                ContentUnavailableView("Can't play this recording", systemImage: "exclamationmark.triangle", description: Text(failure))
+                Label(failure, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                VStack(spacing: 6) {
-                    Slider(value: $player.time, in: 0...max(player.duration, 0.1)) { editing in
-                        player.scrubbing = editing
-                        if !editing { player.seek(to: player.time) }
+                VStack(spacing: 10) {
+                    VStack(spacing: 2) {
+                        Slider(value: $player.time, in: 0...max(player.duration, 0.1)) { editing in
+                            player.scrubbing = editing
+                            if !editing { player.seek(to: player.time) }
+                        }
+                        HStack { Text(clock(player.time)); Spacer(); Text("-" + clock(player.duration - player.time)) }
+                            .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                     }
                     HStack {
-                        Text(clock(player.time)); Spacer(); Text("-" + clock(player.duration - player.time))
-                    }.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        Menu {
+                            Picker("Speed", selection: $player.rate) {
+                                ForEach([Float(1), 1.25, 1.5, 2], id: \.self) { Text("\($0.formatted())×").tag($0) }
+                            }
+                        } label: { Text("\(player.rate.formatted())×").font(.subheadline.weight(.semibold).monospacedDigit()).frame(width: 52, alignment: .leading) }
+                        Spacer()
+                        HStack(spacing: 30) {
+                            Button { player.seek(to: player.time - 15) } label: { Image(systemName: "gobackward.15").font(.title3) }
+                                .accessibilityLabel("Back 15 seconds")
+                            Button { player.toggle() } label: {
+                                Image(systemName: player.playing ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 44))
+                            }.accessibilityLabel(player.playing ? "Pause" : "Play")
+                            Button { player.seek(to: player.time + 15) } label: { Image(systemName: "goforward.15").font(.title3) }
+                                .accessibilityLabel("Forward 15 seconds")
+                        }
+                        Spacer()
+                        Color.clear.frame(width: 52, height: 1)
+                    }
+                    .buttonStyle(.borderless)
                 }
-                HStack(spacing: 44) {
-                    Button { player.seek(to: player.time - 15) } label: { Image(systemName: "gobackward.15").font(.title) }
-                        .accessibilityLabel("Back 15 seconds")
-                    Button { player.toggle() } label: {
-                        Image(systemName: player.playing ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 64))
-                    }.accessibilityLabel(player.playing ? "Pause" : "Play")
-                    Button { player.seek(to: player.time + 15) } label: { Image(systemName: "goforward.15").font(.title) }
-                        .accessibilityLabel("Forward 15 seconds")
-                }
-                Picker("Speed", selection: $player.rate) {
-                    ForEach([Float(1), 1.25, 1.5, 2], id: \.self) { Text("\($0.formatted())×").tag($0) }
-                }.pickerStyle(.segmented).frame(maxWidth: 260)
             }
         }
-        .padding(24)
-        .task {
-            do { try player.load(try await SyncEngine.shared.audioFile(for: item)); player.toggle() }
+        .padding(.top, 6)
+        .task(id: item.id) {
+            loading = true; failure = nil
+            do { try player.load(try await SyncEngine.shared.playableFile(for: item)); player.toggle() }
             catch { failure = error.localizedDescription }
             loading = false
         }
-        .onDisappear { player.stop() }
     }
 
     private func clock(_ seconds: TimeInterval) -> String {

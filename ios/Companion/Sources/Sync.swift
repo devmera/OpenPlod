@@ -1,3 +1,4 @@
+import AVFoundation
 import CryptoKit
 import Foundation
 import UIKit
@@ -191,6 +192,35 @@ final class SyncEngine: ObservableObject {
         library[index].place = place
         if let ext { library[index].ext = ext }
         saveLibrary()
+    }
+
+    /// A seekable copy for playback. Ogg Opus has no seek index, so AVAudioPlayer restarts from the
+    /// beginning when scrubbing; an AAC copy in M4A seeks exactly. Made once (about 2-3 s for 10 min)
+    /// and kept in the cache.
+    func playableFile(for item: LibraryItem) async throws -> URL {
+        let source = try await audioFile(for: item)
+        let target = source.deletingLastPathComponent().appending(path: "Plaud-\(item.id).m4a")
+        if FileManager.default.fileExists(atPath: target.path) { return target }
+        let partial = target.deletingLastPathComponent().appending(path: "Plaud-\(item.id).partial.m4a")
+        try await Task.detached(priority: .userInitiated) {
+            try? FileManager.default.removeItem(at: partial)
+            do {
+                let input = try AVAudioFile(forReading: source)
+                let format = input.processingFormat
+                let output = try AVAudioFile(forWriting: partial, settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: format.sampleRate,
+                                                                           AVNumberOfChannelsKey: format.channelCount, AVEncoderBitRateKey: 64000],
+                                             commonFormat: .pcmFormatFloat32, interleaved: false)
+                guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 32768) else { throw CompanionFailure("Could not prepare the audio.") }
+                while input.framePosition < input.length {
+                    try input.read(into: buffer)
+                    if buffer.frameLength == 0 { break }
+                    try output.write(from: buffer)
+                }
+                if #available(iOS 18, *) { output.close() }
+            }
+            try FileManager.default.moveItem(at: partial, to: target)
+        }.value
+        return target
     }
 
     /// Where a recording can be played from: a local copy (cached or not yet uploaded), else the NAS.

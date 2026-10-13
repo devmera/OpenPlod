@@ -5,6 +5,7 @@ import { PlaudConnection, type PlaudIdentity } from './plaud-connection';
 import { PlaudTransport } from './plaud-transport';
 import { decodePlaudAudio } from './plaud-audio';
 import { downloadPlaudSession, listPlaudSessions, recordingHandshake, unlinkRecorder } from './plaud-transfer';
+import { plaudTransfers, type PlaudTransferPhase } from './plaud-transfers';
 import type { PlaudSessionEntry } from './plaud-protocol';
 import { fingerprintFile, importRecordingFile } from '../library/recording-library';
 import { openPlaudCheckpoint } from './plaud-checkpoint';
@@ -166,6 +167,19 @@ export async function unwrapFileKey(ciphertext: Buffer, keys: string[], decrypt:
 
 export async function importDirectPlaudRecording(sessionId: number) {
   if (!Number.isSafeInteger(sessionId) || sessionId < 0 || sessionId > 0xffffffff) throw new Error('Invalid Plaud session ID');
+  let size = 0;
+  try {
+    const result = await transferDirectPlaudRecording(sessionId, (patch, total) => { size = total; plaudTransfers.update(sessionId, total, patch); });
+    plaudTransfers.finish(sessionId);
+    return result;
+  } catch (error) {
+    if (size) plaudTransfers.fail(sessionId, error instanceof Error ? error.message : 'Transfer failed');
+    else plaudTransfers.finish(sessionId);
+    throw error;
+  }
+}
+
+async function transferDirectPlaudRecording(sessionId: number, report: (patch: { phase: PlaudTransferPhase; received?: number }, size: number) => void) {
   return withDevice(async (connection, identity, signal) => {
     const sessions = await listPlaudSessions(connection);
     const selected = sessions.find(session => session.sessionId === sessionId);
@@ -176,8 +190,11 @@ export async function importDirectPlaudRecording(sessionId: number) {
     const previous = await readFile(resumePath).catch(() => Buffer.alloc(0));
     const prefix = previous.subarray(0, Math.min(previous.length, selected.size - 1));
     const checkpoint = await openPlaudCheckpoint(resumePath, prefix.length);
-    const downloaded = await downloadPlaudSession(connection, selected, { prefix, checkpoint: bytes => checkpoint.save(bytes) })
+    report({ phase: 'downloading', received: prefix.length }, selected.size);
+    const downloaded = await downloadPlaudSession(connection, selected, { prefix, checkpoint: bytes => checkpoint.save(bytes),
+      progress: received => report({ phase: 'downloading', received }, selected.size) })
       .finally(() => checkpoint.close());
+    report({ phase: 'decoding', received: selected.size }, selected.size);
     const keys = [identity.privateKey, ...await previousPrivateKeys(identity.serial)];
     const decoded = await decodePlaudAudio(downloaded.bytes, ciphertext => unwrapFileKey(ciphertext, keys,
       key => connection.transport.request('rsa-decrypt', { key, data: ciphertext.toString('base64') })));
@@ -194,6 +211,7 @@ export async function importDirectPlaudRecording(sessionId: number) {
       const duration = Number(probe.format?.duration);
       if (!Number.isFinite(duration) || duration <= 0) throw new Error('Decoded Plaud recording has no playable duration');
       signal.throwIfAborted();
+      report({ phase: 'saving', received: selected.size }, selected.size);
       const result = await importRecordingFile({ sourcePath: playbackPath, originalFilename: `Plaud-${sessionId}.m4a`,
         provenance: { sourceProvider: 'plaud', sourceTransport: 'ble', sourceRecordingId: `${identity.serial}:${sessionId}` },
         metadata: { durationMs: Math.round(duration * 1000) } });

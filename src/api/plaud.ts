@@ -3,6 +3,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { getConnInfo } from 'hono/bun';
 import { PlaudEnrollment } from '../sync/plaud-enrollment';
 import { loadIdentity } from '../sync/plaud-direct';
+import { plaudTransfers } from '../sync/plaud-transfers';
 import { existsSync, mkdirSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { db, sqlite } from '../db/client';
@@ -112,6 +113,8 @@ app.get('/device-import/:id', c => {
     : c.json({ success: false, error: 'Import job unavailable; refresh the library before retrying' }, 404);
 });
 app.post('/device-cancel', c => { cancelDirectPlaud(); return c.json({ success: true }); });
+// Recordings moving from the recorder right now, shown as rows in the library while they transfer.
+app.get('/transfers', c => { c.header('Cache-Control', 'no-store'); return c.json({ success: true, data: plaudTransfers.list() }); });
 
 // ---------------------------------------------------------------------------
 // Cloud transfer

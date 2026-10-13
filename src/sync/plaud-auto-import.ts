@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import { plaudTransfers } from './plaud-transfers';
 import { directPlaudConfigured, importDirectPlaudRecording, readDirectPlaudRecordings } from './plaud-direct';
 
 export class PlaudAutoImport {
@@ -42,6 +43,10 @@ export class PlaudAutoImport {
       const existing = new Set((this.database.query(
         `SELECT source_recording_id AS sourceId FROM recordings WHERE source_provider=? AND source_recording_id IS NOT NULL`,
       ).all('plaud') as { sourceId: string }[]).map(row => row.sourceId));
+      // Show every recording this round will fetch as a queued row before the first transfer starts.
+      plaudTransfers.queue(result.sessions.filter(session => session.size > 512
+        && (settled?.has(session.sessionId) || this.previous.get(`${result.serial}:${session.sessionId}`) === session.size)
+        && !existing.has(`${result.serial}:${session.sessionId}`)));
       for (const session of result.sessions) {
         const source = `${result.serial}:${session.sessionId}`; observed.set(source, session.size);
         if (!this.enabled()) break;
@@ -71,6 +76,6 @@ export class PlaudAutoImport {
     } catch (e) {
       this.error = e instanceof Error ? e.message : 'Plaud automatic import unavailable.';
       this.retryAt = Date.now() + Math.min(15 * 60000, 30000 * 2 ** Math.min(this.failures++, 5));
-    } finally { this.running = false; }
+    } finally { this.running = false; plaudTransfers.dropQueued(); }
   }
 }

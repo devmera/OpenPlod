@@ -31,7 +31,11 @@ struct RecorderView: View {
                     if !engine.items.isEmpty {
                         Section("This sync") {
                             ForEach(engine.items) { item in
-                                LabeledContent(Date(timeIntervalSince1970: TimeInterval(item.id)).formatted(date: .abbreviated, time: .shortened)) { phase(item.phase) }
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(Date(timeIntervalSince1970: TimeInterval(item.id)).formatted(date: .abbreviated, time: .shortened))
+                                    Spacer(minLength: 12)
+                                    phase(item.phase).font(.subheadline).multilineTextAlignment(.trailing)
+                                }
                             }
                         }
                     }
@@ -60,6 +64,8 @@ struct RecorderView: View {
         switch phase {
         case .waiting: Text("Waiting").foregroundStyle(.secondary)
         case .downloading: Label("Downloading", systemImage: "arrow.down.circle")
+        case .downloaded: Label("Downloaded", systemImage: "arrow.down.circle.fill").foregroundStyle(.secondary)
+        case .unreadable: Label("Other key – skipped", systemImage: "key.slash").foregroundStyle(.secondary)
         case .uploading: Label("Uploading", systemImage: "arrow.up.circle")
         case .done: Label("On NAS", systemImage: "checkmark.circle").foregroundStyle(.green)
         case .failed(let reason): Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(.red).lineLimit(2)

@@ -1,10 +1,11 @@
+import CryptoKit
 import Foundation
 
 /// Copies new recordings from the recorder to the NAS. A recording counts as done only after the NAS
 /// confirms the whole file; until then the phone keeps its copy and retries on the next sync.
 @MainActor
 final class SyncEngine: ObservableObject {
-    enum Phase: Equatable { case waiting, downloading, uploading, done, failed(String) }
+    enum Phase: Equatable { case waiting, downloading, downloaded, uploading, done, unreadable, failed(String) }
     struct Item: Identifiable, Equatable { let id: UInt32; var phase: Phase }
 
     @Published private(set) var items: [Item] = []
@@ -18,6 +19,14 @@ final class SyncEngine: ObservableObject {
     private func markUploaded(_ serial: String, _ session: UInt32) {
         UserDefaults.standard.set(Array(uploaded(serial).union([session])).map(Int.init), forKey: doneKey(serial))
     }
+    /// Recordings made under a key this phone does not hold: not downloaded again until the key changes.
+    private func unreadableKey(_ key: RecorderKey) -> String {
+        "unreadable.\(key.serial).\(SHA256.hash(data: Data(key.privateKey.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined())"
+    }
+    private func unreadable(_ key: RecorderKey) -> Set<UInt32> { Set((UserDefaults.standard.array(forKey: unreadableKey(key)) as? [Int] ?? []).map(UInt32.init)) }
+    private func markUnreadable(_ key: RecorderKey, _ session: UInt32) {
+        UserDefaults.standard.set(Array(unreadable(key).union([session])).map(Int.init), forKey: unreadableKey(key))
+    }
 
     func sync(key: RecorderKey, destination: Destination) async {
         guard !running else { return }
@@ -28,8 +37,8 @@ final class SyncEngine: ObservableObject {
             let nas = WebDAV(destination: destination)
             try await nas.check()
             let onRecorder = try await listRecordings(key: key, device: nil, timeoutSecs: 20)
-            let done = uploaded(key.serial)
-            let waiting = onRecorder.filter { !done.contains($0.sessionId) }.map(\.sessionId)
+            let done = uploaded(key.serial), skipped = unreadable(key)
+            let waiting = onRecorder.filter { !done.contains($0.sessionId) && !skipped.contains($0.sessionId) }.map(\.sessionId)
             // Downloaded on an earlier run but not yet on the NAS.
             let kept = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
                 .filter { ["ogg", "opus"].contains($0.pathExtension) }
@@ -37,9 +46,18 @@ final class SyncEngine: ObservableObject {
             items = waiting.map { Item(id: $0, phase: .waiting) }
             let toDownload = waiting.filter { !keptIds.contains($0) }
             if !toDownload.isEmpty {
-                for id in toDownload { set(id, .downloading) }
                 let listener = ProgressRelay { [weak self] id, state, detail in
-                    Task { @MainActor in if state == "failed" { self?.set(id, .failed(detail ?? "Download failed")) } }
+                    Task { @MainActor in
+                        guard let self else { return }
+                        switch state {
+                        case "started": self.set(id, .downloading)
+                        case "saved": self.set(id, .downloaded)
+                        default:
+                            // Made while the recorder was bound to another key: it can never be decrypted here.
+                            if detail?.contains("decrypting") == true { self.markUnreadable(key, id); self.set(id, .unreadable) }
+                            else { self.set(id, .failed(detail ?? "Download failed")) }
+                        }
+                    }
                 }
                 _ = try await pullRecordings(key: key, device: nil, timeoutSecs: 20, sessionIds: toDownload, outDir: folder.path, listener: listener)
             }
@@ -63,8 +81,10 @@ final class SyncEngine: ObservableObject {
                 }
             }
             let failed = items.filter { if case .failed = $0.phase { true } else { false } }.count
+            let otherKey = items.filter { $0.phase == .unreadable }.count
             summary = waiting.isEmpty && uploadedCount == 0 ? "Everything is already on the NAS."
-                : "\(uploadedCount) uploaded" + (failed > 0 ? ", \(failed) will be retried next sync." : ".")
+                : "\(uploadedCount) uploaded" + (failed > 0 ? ", \(failed) will be retried next sync" : "")
+                    + (otherKey > 0 ? ", \(otherKey) made under another key skipped" : "") + "." 
         } catch {
             summary = error.localizedDescription
         }

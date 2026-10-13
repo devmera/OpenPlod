@@ -9,6 +9,7 @@ import { PlaudCloudImport } from '@/components/PlaudCloudImport'
 import { PlaudDeviceAuthorization } from '@/components/PlaudDeviceAuthorization'
 import { PlaudSystemCheck } from '@/components/PlaudSystemCheck'
 import { api, type DashboardStats, type DeviceRecording, type PlaudStatus } from '@/lib/api'
+import { libraryChanged } from '@/lib/library-changes'
 import './desktop-plaud.css'
 
 const sessionDate = (session: DeviceRecording) => new Date(session.sessionId * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -39,7 +40,8 @@ export function DesktopPlaud() {
   useEffect(() => {
     mounted.current = true; loadStats()
     window.addEventListener('plaud:sync-complete', loadStats)
-    return () => { mounted.current = false; active.current?.abort(); window.removeEventListener('plaud:sync-complete', loadStats) }
+    window.addEventListener(libraryChanged, loadStats)
+    return () => { mounted.current = false; active.current?.abort(); window.removeEventListener('plaud:sync-complete', loadStats); window.removeEventListener(libraryChanged, loadStats) }
   }, [loadStats])
 
   const scan = async () => {

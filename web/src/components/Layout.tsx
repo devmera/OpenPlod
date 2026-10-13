@@ -32,6 +32,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
+import { libraryChanged, useLibraryWatcher } from "@/lib/library-changes";
 import { getRuntime, apiUrl, authenticatedHeaders } from "@/lib/runtime";
 import { useTheme } from "@/hooks/useTheme";
 import { buildInfo, buildLabel } from "@/lib/build-info";
@@ -75,11 +76,14 @@ export function Layout() {
         .catch(() => {});
     void load();
     window.addEventListener("plaud:sync-complete", load);
+    window.addEventListener(libraryChanged, load);
     return () => {
       disposed = true;
       window.removeEventListener("plaud:sync-complete", load);
+      window.removeEventListener(libraryChanged, load);
     };
   }, []);
+  useLibraryWatcher();
 
   useLayoutEffect(() => {
     pageScrollRef.current?.scrollTo({ top: 0 });

@@ -31,6 +31,7 @@ import {
   Code,
 } from "@/components/icons";
 import { loadWaveform } from '@/lib/audio-loader';
+import { useLibraryChanges } from "@/lib/library-changes";
 import { IconButton } from './ui/icon-button';
 import { PlaybackSpeedMenu } from './PlaybackSpeedMenu';
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
@@ -86,6 +87,9 @@ export function RecordingPreview({
     wave = useRef<WaveSurfer | null>(null),
     audioUrl = useRef("");
   const navigate = useNavigate();
+  // A transcript or summary finishing elsewhere shows up here without reopening the recording.
+  const [libraryVersion, setLibraryVersion] = useState(0);
+  useLibraryChanges(() => setLibraryVersion(value => value + 1));
   useEffect(() => {
     let disposed = false;
     api
@@ -103,7 +107,7 @@ export function RecordingPreview({
     return () => {
       disposed = true;
     };
-  }, [id, metadataRefresh]);
+  }, [id, metadataRefresh, libraryVersion]);
   useEffect(() => {
     if (!container.current) return;
     let disposed = false,

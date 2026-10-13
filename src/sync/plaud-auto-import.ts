@@ -9,6 +9,8 @@ export class PlaudAutoImport {
   private failures = 0;
   private retryAt = 0;
   private lastSync: { at: string; imported: number } | null = null;
+  /** The recorder's list from the last background round, so the UI can show it without connecting. */
+  lastListing: { serial: string; checkedAt: string; sessions: { sessionId: number; size: number; scene: number; timezone: number }[] } | null = null;
   constructor(private database: Database, private adapter = { configured: directPlaudConfigured, list: readDirectPlaudRecordings, import: importDirectPlaudRecording }) {
     database.exec(`CREATE TABLE IF NOT EXISTS plaud_import_events (id INTEGER PRIMARY KEY AUTOINCREMENT, recording_id TEXT NOT NULL, created_at TEXT NOT NULL);`);
   }
@@ -32,6 +34,7 @@ export class PlaudAutoImport {
     try {
       const result = await this.adapter.list(options.settleMs ? { settleMs: options.settleMs } : undefined); this.lastChecked = result.checkedAt;
       const settled = result.stable ? new Set(result.stable) : null;
+      this.lastListing = { serial: result.serial, checkedAt: result.checkedAt, sessions: result.sessions };
       const observed = new Map<string, number>();
       const existing = new Set((this.database.query(
         `SELECT source_recording_id AS sourceId FROM recordings WHERE source_provider=? AND source_recording_id IS NOT NULL`,

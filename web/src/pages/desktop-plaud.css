@@ -145,3 +145,4 @@
   .plaud-authorizations .device-recording-row { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) { .plaud-switch > span { transition: none !important; } }
+.plaud-sync-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }

@@ -9,6 +9,7 @@ import { PlaudCloudImport } from '@/components/PlaudCloudImport'
 import { PlaudDeviceAuthorization } from '@/components/PlaudDeviceAuthorization'
 import { PlaudSystemCheck } from '@/components/PlaudSystemCheck'
 import { api, type DashboardStats, type DeviceRecording, type PlaudStatus } from '@/lib/api'
+import { presenceLabel, usePlaudSyncStatus } from '@/lib/plaud-sync'
 import './desktop-plaud.css'
 
 const sessionDate = (session: DeviceRecording) => new Date(session.sessionId * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -18,7 +19,11 @@ export function DesktopPlaud() {
   const [phase, setPhase] = useState<'idle' | 'scanning' | 'listing' | 'downloading' | 'cancelling'>('idle')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-  const [sessions, setSessions] = useState<DeviceRecording[] | null>(null)
+  const [scanned, setScanned] = useState<DeviceRecording[] | null>(null)
+  // The list from the last background sync, shown until (or instead of) a manual connect.
+  const [cached, setCached] = useState<{ sessions: DeviceRecording[]; checkedAt: string } | null>(null)
+  const sync = usePlaudSyncStatus()
+  const presence = presenceLabel(sync)
   const [selected, setSelected] = useState<number[]>([])
   const [confirmation, setConfirmation] = useState<DeviceRecording[] | null>(null)
   const [downloading, setDownloading] = useState<number | null>(null)
@@ -30,7 +35,16 @@ export function DesktopPlaud() {
   const cancelling = useRef(false)
   const recordingSection = useRef<HTMLElement>(null)
   const busy = phase !== 'idle'
+  const sessions = scanned ?? cached?.sessions ?? null
+  const fromBackground = scanned === null && cached !== null
   const pending = sessions?.filter(session => !session.recordingId) || []
+
+  const loadCached = useCallback(() => {
+    void api.getCachedDeviceRecordings().then(value => { if (mounted.current) setCached(value) }).catch(() => undefined)
+  }, [])
+  // A finished background round may have changed the list or imported recordings.
+  const lastRound = sync?.lastSync?.at ?? sync?.lastChecked ?? null
+  useEffect(() => { loadCached(); loadStats() }, [lastRound, loadCached]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadStats = useCallback(() => {
     void api.getStats().then(value => { if (mounted.current) { setStats(value); setStatsError('') } })
@@ -45,7 +59,7 @@ export function DesktopPlaud() {
   const scan = async () => {
     if (active.current) return
     const controller = new AbortController(); active.current = controller
-    setPhase('scanning'); setError(''); setNotice(''); setSessions(null); setSelected([]); setStatus(null); setCheckedAt(null)
+    setPhase('scanning'); setError(''); setNotice(''); setScanned(null); setSelected([]); setStatus(null); setCheckedAt(null)
     try {
       const result = await api.getPlaudStatus(controller.signal)
       if (controller.signal.aborted) return
@@ -53,7 +67,7 @@ export function DesktopPlaud() {
       if (result.directTransferAvailable) {
         setPhase('listing')
         const files = await api.getDeviceRecordings(controller.signal)
-        if (!controller.signal.aborted) { setSessions(files); setCheckedAt(new Date()) }
+        if (!controller.signal.aborted) { setScanned(files); setCheckedAt(new Date()) }
       }
     } catch (failure) {
       if (mounted.current && !controller.signal.aborted) setError(failure instanceof Error ? failure.message : 'Bluetooth scan failed.')
@@ -72,7 +86,8 @@ export function DesktopPlaud() {
         const id = await api.importDeviceRecording(session.sessionId, controller.signal)
         if (controller.signal.aborted) return
         saved++
-        setSessions(current => current?.map(item => item.sessionId === session.sessionId ? { ...item, recordingId: id, retentionState: 'active' } : item) ?? null)
+        setScanned(current => current?.map(item => item.sessionId === session.sessionId ? { ...item, recordingId: id, retentionState: 'active' } : item) ?? null)
+        setCached(current => current && { ...current, sessions: current.sessions.map(item => item.sessionId === session.sessionId ? { ...item, recordingId: id, retentionState: 'active' } : item) })
         setSelected(current => current.filter(value => value !== session.sessionId))
         setNotice(`${saved} recording${saved === 1 ? '' : 's'} saved to your vault`)
         window.dispatchEvent(new CustomEvent('plaud:sync-complete'))
@@ -93,7 +108,11 @@ export function DesktopPlaud() {
   }
 
   const access = sessions !== null
-  const statusLabel = phase === 'cancelling' ? 'Cancelling' : phase === 'scanning' ? 'Searching nearby' : phase === 'listing' ? 'Reading device' : phase === 'downloading' ? 'Importing audio' : access ? 'Access verified' : status?.deviceDetected ? 'Device detected' : status ? 'Not detected' : 'Not connected'
+  // Manual operations first, then what background sync currently knows about the recorder.
+  const statusLabel = phase === 'cancelling' ? 'Cancelling' : phase === 'scanning' ? 'Searching nearby' : phase === 'listing' ? 'Reading device' : phase === 'downloading' ? 'Importing audio'
+    : presence?.live ? presence.label : scanned !== null ? 'Access verified' : presence ? presence.label
+    : status?.deviceDetected ? 'Device detected' : status ? 'Not detected' : 'Not connected'
+  const live = access && (scanned !== null || Boolean(presence?.live))
   const states = [
     { icon: Radio, name: 'Bluetooth discovery', value: status ? status.deviceDetected ? 'Detected' : 'Not detected' : phase === 'scanning' ? 'Searching' : 'Not checked', ok: !!status?.deviceDetected },
     { icon: Bluetooth, name: 'Bluetooth connection', value: access || status?.connectionVerified ? 'Verified' : 'Not verified', ok: access || !!status?.connectionVerified },
@@ -104,14 +123,14 @@ export function DesktopPlaud() {
 
   return <div className="plaud-workspace">
     <header className="plaud-page-heading"><div className="plaud-page-title"><span className="plaud-heading-icon"><Bluetooth /></span><div><h1>Plaud Note Pro</h1><p>Device, recordings &amp; imports</p></div></div>
-      <div className="plaud-status-strip" role="status"><span className="plaud-state" data-verified={access}><i />{statusLabel}</span>{checkedAt && <span className="plaud-checked"><Clock3 />Checked {checkedAt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>}</div>
+      <div className="plaud-status-strip" role="status"><span className="plaud-state" data-verified={live}><i />{statusLabel}</span>{checkedAt && <span className="plaud-checked"><Clock3 />Checked {checkedAt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>}</div>
     </header>
     {(error || notice) && <div className={`plaud-feedback ${error ? 'is-error' : ''}`} role={error ? 'alert' : 'status'}>{error ? <Radio /> : <Check />}<span>{error || notice}</span><IconButton label="Dismiss device message" onClick={() => { setError(''); setNotice('') }}><X /></IconButton></div>}
     <div className="plaud-workspace-grid">
       <section className="plaud-device-overview" aria-label="Desktop Plaud connection">
         <div className="plaud-product-image"><img src="/plaud-note-pro.png" alt="Plaud Note Pro recorder" width="220" height="280" /></div>
         <div className="plaud-device-info"><h2>{status?.deviceName || 'Plaud Note Pro'}</h2><p>AI voice recorder</p>
-          <dl><div><dt><Bluetooth />Bluetooth</dt><dd className="plaud-state" data-verified={access}><i />{statusLabel}</dd></div><div><dt><FileAudio />On device</dt><dd>{sessions === null ? 'Unknown' : `${sessions.length} recordings`}</dd></div><div><dt><ShieldCheck />Original audio</dt><dd>Kept on Plaud</dd></div></dl>
+          <dl><div><dt><Bluetooth />Bluetooth</dt><dd className="plaud-state" data-verified={live}><i />{statusLabel}</dd></div><div><dt><FileAudio />On device</dt><dd>{sessions === null ? 'Unknown' : `${sessions.length} recordings`}</dd></div><div><dt><ShieldCheck />Original audio</dt><dd>Kept on Plaud</dd></div></dl>
           <div className="plaud-connect-actions"><Button disabled={busy} onClick={() => void scan()}>{busy ? <Loader2 className="animate-spin" /> : status ? <RefreshCw /> : <Bluetooth />}{phase === 'scanning' ? 'Connecting' : phase === 'listing' ? 'Reading recordings' : status ? 'Refresh recordings' : 'Connect Note Pro'}</Button>
             {busy && <IconButton label="Cancel device operation" onClick={() => void cancel()}><X /></IconButton>}</div>
           <div className="plaud-secondary-actions"><Button size="sm" variant="outline" disabled={busy || !pending.length} onClick={() => setConfirmation(pending)}><Download />Import new</Button><Button asChild variant="outline" size="sm"><Link to="/recordings"><FolderOpen />Open library</Link></Button></div>
@@ -122,7 +141,7 @@ export function DesktopPlaud() {
         {status?.detail && <details className="plaud-diagnostics"><summary>Connection details</summary><p>{status.detail}</p></details>}
       </section>
       <section className="plaud-device-recordings" aria-label="Recordings on Note Pro" ref={recordingSection}>
-        <header className="plaud-section-heading"><span className="plaud-section-icon"><FileAudio /></span><div><h2>On your Note Pro</h2><p>{sessions === null ? 'Recording count unknown' : `${sessions.length} recordings / ${pending.length} new`}</p></div><Button size="sm" disabled={busy || !selected.length} onClick={() => setConfirmation(pending.filter(session => selected.includes(session.sessionId)))}><Download /><span>Import selected{selected.length ? ` (${selected.length})` : ''}</span></Button></header>
+        <header className="plaud-section-heading"><span className="plaud-section-icon"><FileAudio /></span><div><h2>On your Note Pro</h2><p>{sessions === null ? 'Recording count unknown' : `${sessions.length} recordings / ${pending.length} new`}{fromBackground && cached && ` · as of ${new Date(cached.checkedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`}</p></div><Button size="sm" disabled={busy || !selected.length} onClick={() => setConfirmation(pending.filter(session => selected.includes(session.sessionId)))}><Download /><span>Import selected{selected.length ? ` (${selected.length})` : ''}</span></Button></header>
         {sessions === null ? <div className="plaud-recordings-empty">{busy ? <Loader2 className="animate-spin" /> : <Bluetooth />}<h3>{busy ? 'Reading your Note Pro' : 'Connect to see recordings'}</h3><p>{status && !status.directTransferAvailable ? 'Device authorization is not configured on this computer.' : error ? 'The device list is unavailable. No recording count has been reported.' : 'No recording list has been received yet.'}</p>{!busy && <Button variant="outline" size="sm" onClick={() => void scan()}><RefreshCw />{error ? 'Try again' : 'Check device'}</Button>}</div>
           : sessions.length === 0 ? <div className="plaud-recordings-empty"><FileAudio /><h3>No completed recordings returned</h3><p>Finish a recording on the Note Pro, then refresh.</p></div> : <>
             <label className="plaud-select-all"><input type="checkbox" aria-label="Select all new recordings" checked={pending.length > 0 && selected.length === pending.length} ref={node => { if (node) node.indeterminate = selected.length > 0 && selected.length < pending.length }} disabled={busy || !pending.length} onChange={event => setSelected(event.target.checked ? pending.map(session => session.sessionId) : [])} /><span>Select all new</span><small>{sessions.length} on device</small></label>

@@ -69,6 +69,17 @@ let importJob: { id: string; state: 'running' | 'complete' | 'failed'; result?: 
 
 app.get('/device-recordings', async c => {
   c.header('Cache-Control', 'no-store');
+  // ?cached=1: the list from the last background sync round, without connecting to the recorder.
+  if (c.req.query('cached')) {
+    const listing = automaticPlaud.lastListing;
+    if (!listing) return c.json({ success: true, data: null, checkedAt: null });
+    const saved = await db.select({ id: recordings.id, sourceId: recordings.sourceRecordingId, retention: recordings.retentionState })
+      .from(recordings).where(eq(recordings.sourceProvider, 'plaud'));
+    return c.json({ success: true, cached: true, checkedAt: listing.checkedAt, data: listing.sessions.map(session => {
+      const existing = saved.find(recording => recording.sourceId === `${listing.serial}:${session.sessionId}`);
+      return { ...session, recordingId: existing?.id ?? null, retentionState: existing?.retention ?? null };
+    }) });
+  }
   try {
     const result = await readDirectPlaudRecordings();
     const saved = await db.select({ id: recordings.id, sourceId: recordings.sourceRecordingId, retention: recordings.retentionState })

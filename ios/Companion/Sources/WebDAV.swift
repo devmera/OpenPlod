@@ -68,6 +68,15 @@ struct WebDAV {
         guard let reported, Int(reported) == size else { throw CompanionFailure("The NAS does not hold all of \(name) yet.") }
     }
 
+    /// Downloads `name` from the folder to `file`.
+    func download(_ name: String, to file: URL) async throws {
+        let request = try authorized(URLRequest(url: try base.appending(path: name), timeoutInterval: 120))
+        let (temporary, response) = try await URLSession.shared.download(for: request)
+        try expect(response, [200], "Fetching \(name)")
+        try? FileManager.default.removeItem(at: file)
+        try FileManager.default.moveItem(at: temporary, to: file)
+    }
+
     private func authorized(_ request: URLRequest) throws -> URLRequest {
         var request = request
         let credentials = Data("\(destination.username):\(destination.password)".utf8).base64EncodedString()

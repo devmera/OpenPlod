@@ -26,6 +26,8 @@ final class SyncEngine: ObservableObject {
         let id: UInt32
         let size: UInt32
         var place: Place
+        /// Audio file extension once known (`ogg` or `opus`); nil for older entries.
+        var ext: String? = nil
         var date: Date { Date(timeIntervalSince1970: TimeInterval(id)) }
     }
     @Published private(set) var library: [LibraryItem] = (try? JSONDecoder().decode([LibraryItem].self, from: UserDefaults.standard.data(forKey: "library") ?? Data())) ?? []
@@ -140,7 +142,7 @@ final class SyncEngine: ObservableObject {
                     try await nas.upload(file: sidecar, as: sidecar.lastPathComponent)
                     try await nas.upload(file: file, as: name)
                     markUploaded(key.serial, session)
-                    place(session, .nas)
+                    place(session, .nas, ext: file.pathExtension)
                     try? FileManager.default.removeItem(at: file)
                     try? FileManager.default.removeItem(at: sidecar)
                     set(session, .done); uploadedCount += 1
@@ -184,8 +186,32 @@ final class SyncEngine: ObservableObject {
         saveLibrary()
     }
 
-    private func place(_ id: UInt32, _ place: LibraryItem.Place) {
-        if let index = library.firstIndex(where: { $0.id == id }) { library[index].place = place; saveLibrary() }
+    private func place(_ id: UInt32, _ place: LibraryItem.Place, ext: String? = nil) {
+        guard let index = library.firstIndex(where: { $0.id == id }) else { return }
+        library[index].place = place
+        if let ext { library[index].ext = ext }
+        saveLibrary()
+    }
+
+    /// Where a recording can be played from: a local copy (cached or not yet uploaded), else the NAS.
+    func audioFile(for item: LibraryItem) async throws -> URL {
+        let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appending(path: "audio", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        let extensions = item.ext.map { [$0] } ?? ["ogg", "opus"]
+        for ext in extensions {
+            for local in [cache.appending(path: "Plaud-\(item.id).\(ext)"), folder.appending(path: "\(item.id).\(ext)")]
+            where FileManager.default.fileExists(atPath: local.path) { return local }
+        }
+        guard item.place == .nas, let destination = Destination.load() else {
+            throw CompanionFailure("This recording is still only on the recorder. Sync to play it.")
+        }
+        var lastError: Error = CompanionFailure("Could not fetch the recording from the NAS.")
+        for ext in extensions {
+            let target = cache.appending(path: "Plaud-\(item.id).\(ext)")
+            do { try await WebDAV(destination: destination).download("Plaud-\(item.id).\(ext)", to: target); return target }
+            catch { lastError = error }
+        }
+        throw lastError
     }
 
     private func saveLibrary() { UserDefaults.standard.set(try? JSONEncoder().encode(library), forKey: "library") }

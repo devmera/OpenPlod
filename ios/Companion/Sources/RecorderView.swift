@@ -6,6 +6,7 @@ struct RecorderView: View {
     @State private var destination = Destination.load()
     @State private var showingSettings = false
     @State private var editingDestination = false
+    @State private var playing: SyncEngine.LibraryItem?
     @ObservedObject private var engine = SyncEngine.shared
     @ObservedObject private var beacon = BeaconWake.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -47,6 +48,7 @@ struct RecorderView: View {
                     SettingsView(onUnlinked: { self.key = nil }, onDestinationChanged: { destination = $0 })
                 }
                 .sheet(isPresented: $editingDestination) { DestinationView { destination = $0 } }
+                .sheet(item: $playing) { item in PlayerView(item: item).presentationDetents([.medium]) }
                 .task(id: engine.recorderRecording) {
                     // While recording, check every 30 s whether it stopped, then sync.
                     while engine.recorderRecording && scenePhase == .active && !Task.isCancelled {
@@ -77,8 +79,11 @@ struct RecorderView: View {
             }
             VStack(spacing: 8) {
                 Button { Task { await syncNow(key) } } label: {
-                    Label(engine.running ? "Syncing…" : "Sync now", systemImage: "arrow.triangle.2.circlepath")
-                        .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 6)
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Text(engine.running ? "Syncing…" : "Sync now")
+                    }
+                    .font(.headline).frame(maxWidth: .infinity, alignment: .center).padding(.vertical, 6)
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large)
                 .disabled(engine.running || engine.recorderRecording || destination == nil)
@@ -128,7 +133,10 @@ struct RecorderView: View {
         } else {
             ForEach(days, id: \.0) { day, items in
                 Section(day) {
-                    ForEach(items) { item in row(item) }
+                    ForEach(items) { item in
+                        Button { playing = item } label: { row(item) }.foregroundStyle(.primary)
+                            .disabled(item.place == .otherKey)
+                    }
                 }
             }
         }
@@ -146,7 +154,7 @@ struct RecorderView: View {
 
     private func row(_ item: SyncEngine.LibraryItem) -> some View {
         HStack(spacing: 14) {
-            Image(systemName: "waveform").font(.body.weight(.medium)).foregroundStyle(.tint)
+            Image(systemName: "play.fill").font(.body.weight(.medium)).foregroundStyle(.tint)
                 .frame(width: 36, height: 36).background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.date.formatted(date: .omitted, time: .shortened)).font(.body.monospacedDigit())

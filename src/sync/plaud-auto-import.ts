@@ -46,7 +46,7 @@ export class PlaudAutoImport {
       // Show every recording this round will fetch as a queued row before the first transfer starts.
       plaudTransfers.queue(result.sessions.filter(session => session.size > 512
         && (settled?.has(session.sessionId) || this.previous.get(`${result.serial}:${session.sessionId}`) === session.size)
-        && !existing.has(`${result.serial}:${session.sessionId}`)));
+        && !existing.has(`${result.serial}:${session.sessionId}`) && !this.unreadable.has(`${result.serial}:${session.sessionId}`)));
       for (const session of result.sessions) {
         const source = `${result.serial}:${session.sessionId}`; observed.set(source, session.size);
         if (!this.enabled()) break;

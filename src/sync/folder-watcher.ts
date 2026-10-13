@@ -64,6 +64,10 @@ export function folderProvenance(audioPath: string): RecordingProvenance {
   }
 }
 
+/** NAS recycle bins (Synology `#recycle`, `@eaDir`) and hidden folders are never imported. */
+const skippedFolder = (name: string) => name.startsWith('#') || name.startsWith('@') || name.startsWith('.');
+const insideSkippedFolder = (relativePath: string) => relativePath.split(/[\\/]/).slice(0, -1).some(skippedFolder);
+
 export class FolderWatcher {
   private syncPath: string | null;
   private watcher: ReturnType<typeof watch> | null = null;
@@ -94,7 +98,7 @@ export class FolderWatcher {
     if (this.isWatching) return true;
 
     this.watcher = watch(this.syncPath, { recursive: true }, (_eventType, filename) => {
-      if (!filename) return;
+      if (!filename || insideSkippedFolder(filename)) return;
       const fullPath = join(this.syncPath!, filename);
       if (existsSync(fullPath) && this.isAudio(filename)) {
         const existingTimer = this.debounceTimers.get(fullPath);
@@ -135,7 +139,7 @@ export class FolderWatcher {
       for (const entry of await readdir(dir, { withFileTypes: true })) {
         const fullPath = join(dir, entry.name);
         if (entry.isDirectory()) {
-          await scan(fullPath);
+          if (!skippedFolder(entry.name)) await scan(fullPath);
         } else if (this.isAudio(entry.name)) {
           const stats = await stat(fullPath);
           results.push({ filename: entry.name, path: fullPath, size: stats.size, modifiedAt: stats.mtime });

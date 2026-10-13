@@ -21,7 +21,12 @@ final class SyncEngine: ObservableObject {
     /// Guards against back-to-back syncs from repeated triggers; short, because iOS reports a
     /// continuously advertising recorder only once and a dropped report is not repeated.
     private let cooldown: TimeInterval = 45
-    private var lastAttempt: Date?
+    /// How often a beacon wake-up may check the recorder (a few-second connection each time).
+    static let beaconInterval: TimeInterval = 5 * 60
+    private var lastAttempt: Date? {
+        get { UserDefaults.standard.object(forKey: "lastAttempt") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "lastAttempt") }
+    }
     private let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appending(path: "pending", directoryHint: .isDirectory)
 
     // MARK: Hands-free sync
@@ -31,6 +36,13 @@ final class SyncEngine: ObservableObject {
 
     /// The app came to the front: catch up on anything recorded since the last sync.
     func appOpened() { trigger("App opened") }
+
+    /// The recorder's iBeacon was seen (iOS region monitoring): it is nearby. Checks at most every
+    /// `beaconInterval`, since the recorder beacons continuously while beacon wake-up is on.
+    func beaconWake() {
+        if let lastAttempt, Date().timeIntervalSince(lastAttempt) < Self.beaconInterval { return }
+        trigger("Recorder beacon")
+    }
 
     /// iOS background refresh: a periodic chance to sync while the app is not in use.
     func backgroundRefresh() async {

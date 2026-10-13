@@ -34,6 +34,10 @@ targets:
         BGTaskSchedulerPermittedIdentifiers: [com.openplod.companion.refresh]
         NSBluetoothAlwaysUsageDescription: >-
           OpenPlod connects to your Plaud recorder over Bluetooth to copy your recordings.
+        NSLocationWhenInUseUsageDescription: >-
+          OpenPlod uses your recorder's Bluetooth beacon to sync recordings in the background. Your location is never read or stored.
+        NSLocationAlwaysAndWhenInUseUsageDescription: >-
+          Allow “Always” so your recorder's Bluetooth beacon can wake OpenPlod to sync new recordings while the app is closed. Your location is never read or stored.
         NSCameraUsageDescription: >-
           OpenPlod reads the pairing QR code shown by OpenPlod on your Mac.
         NSLocalNetworkUsageDescription: >-
@@ -56,3 +60,4 @@ targets:
       - sdk: CoreBluetooth.framework
       - sdk: Security.framework
       - sdk: VisionKit.framework
+      - sdk: CoreLocation.framework

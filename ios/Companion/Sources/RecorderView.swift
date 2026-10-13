@@ -10,6 +10,7 @@ struct RecorderView: View {
     @State private var editingDestination = false
     @ObservedObject private var engine = SyncEngine.shared
     @ObservedObject private var activity = Activity.shared
+    @ObservedObject private var beacon = BeaconWake.shared
 
     var body: some View {
         NavigationStack {
@@ -37,6 +38,19 @@ struct RecorderView: View {
                             if let summary = engine.summary { Text(summary) }
                             Text(engine.lastSync.map { "Syncs automatically when the recorder is nearby. Last sync \($0.formatted(.relative(presentation: .named)))." }
                                  ?? "Syncs automatically when the recorder is nearby, also with the app in the background.")
+                        }
+                    }
+                    Section {
+                        if beacon.enabled {
+                            Label("On: syncs within about 5 minutes while the recorder is near this iPhone", systemImage: "antenna.radiowaves.left.and.right")
+                        } else {
+                            Button { beacon.requestPermission() } label: { Label("Turn on hands-free sync", systemImage: "antenna.radiowaves.left.and.right") }
+                        }
+                    } header: { Text("Hands-free sync") } footer: {
+                        if !beacon.enabled {
+                            Text(beacon.authorization == .denied || beacon.authorization == .authorizedWhenInUse
+                                 ? "Set Location to “Always” for OpenPlod in Settings. The recorder's beacon then wakes the app; your location is never read or stored."
+                                 : "Uses the recorder's beacon to wake the app in the background. iOS asks for location access “Always”; your location is never read or stored.")
                         }
                     }
                     if !engine.items.isEmpty {
@@ -69,14 +83,14 @@ struct RecorderView: View {
                         }
                     }
                     Section {
-                        Button("Unlink this phone", role: .destructive) { KeyStore.remove(); self.key = nil; recordings = []; RecorderBluetooth.shared.watch(serial: nil) }
+                        Button("Unlink this phone", role: .destructive) { KeyStore.remove(); self.key = nil; recordings = []; RecorderBluetooth.shared.watch(serial: nil); BeaconWake.shared.monitor(serial: nil) }
                     } footer: { Text("Removes the recorder key from this phone only. The recorder and your Mac are not changed.") }
                 }
                 .navigationTitle("OpenPlod")
                 .disabled(busy != nil)
                 .sheet(isPresented: $editingDestination) { DestinationView { saved in destination = saved } }
             } else {
-                LinkView { linked in key = linked; RecorderBluetooth.shared.watch(serial: linked.serial); SyncEngine.requestNotifications() }
+                LinkView { linked in key = linked; RecorderBluetooth.shared.watch(serial: linked.serial); BeaconWake.shared.monitor(serial: linked.serial); SyncEngine.requestNotifications() }
             }
         }
     }

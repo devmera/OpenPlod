@@ -45,6 +45,10 @@
 	<string>OpenPlod reads the pairing QR code shown by OpenPlod on your Mac.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>OpenPlod contacts OpenPlod on your Mac once, to receive the recorder key.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Allow “Always” so your recorder's Bluetooth beacon can wake OpenPlod to sync new recordings while the app is closed. Your location is never read or stored.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>OpenPlod uses your recorder's Bluetooth beacon to sync recordings in the background. Your location is never read or stored.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>

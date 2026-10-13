@@ -12,6 +12,7 @@ struct CompanionApp: App {
         // the recorder was heard (Bluetooth state restoration).
         RecorderBluetooth.shared.onHeard = { SyncEngine.shared.recorderHeard() }
         RecorderBluetooth.shared.watch(serial: KeyStore.load()?.serial)
+        BeaconWake.shared.monitor(serial: KeyStore.load()?.serial)
         if KeyStore.load() != nil { SyncEngine.requestNotifications() }
         // Must be registered before launch finishes.
         BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.refreshTask, using: nil) { task in

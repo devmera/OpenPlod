@@ -10,7 +10,7 @@ import { db, sqlite } from '../db/client';
 import { recordings, transcripts, userSettings } from '../db/schema';
 import { SUBTITLE_MIME, isSubtitleFormat, renderSubtitles, subtitleReadiness } from '../library/subtitle-export';
 import { applyOperation, parseSegments, speakerLabels, type TranscriptOperation } from '../library/transcript-operations';
-import { SpeakerIdentity } from '../library/speaker-identity';
+import { SpeakerIdentity, impliedRenames } from '../library/speaker-identity';
 import { compareVersions, type VersionRecord } from '../library/transcript-diff';
 import { createHash } from 'node:crypto';
 import { readAiConfig, textSelection } from '../ai/config';
@@ -228,7 +228,13 @@ app.patch('/:id/transcript', async c => {
       speaker: z.union([z.number().int().nonnegative(), z.string().max(80)]).optional(), confidence: z.number().optional(),
       words: z.array(z.object({ start: z.number().finite().nonnegative(), end: z.number().finite().nonnegative(), text: z.string().max(200) })).max(5000).nullable().optional(),
     }).refine(s => s.end >= s.start)).max(20000).parse(body.segments);
+    const previous = sqlite.query('SELECT segments FROM transcripts WHERE recording_id = ?').get(c.req.param('id')) as { segments: string | null } | null;
     updateTranscript({ recordingId: c.req.param('id'), fullText: body.fullText, segments: body.segments, revision: body.revision });
+    // A speaker renamed in the correction dialog teaches that person's voice, as a rename in Studio does.
+    if (Array.isArray(body.segments) && previous?.segments) {
+      const renames = impliedRenames(JSON.parse(previous.segments), body.segments as { start: number; speaker?: number | string }[]);
+      if (renames.length) new SpeakerIdentity(sqlite).learn(c.req.param('id'), renames);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Transcript update failed.';
     return c.json({ success: false, error: message }, message === 'revision_conflict' ? 409 : 400);

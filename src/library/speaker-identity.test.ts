@@ -1,6 +1,6 @@
 import { beforeEach, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { SpeakerIdentity, matchSpeakers } from './speaker-identity';
+import { SpeakerIdentity, impliedRenames, matchSpeakers } from './speaker-identity';
 
 let sqlite: Database;
 beforeEach(() => {
@@ -82,4 +82,15 @@ test('re-apply names past recordings and keeps word timings', () => {
   expect(speakers.reapply()).toEqual({ recordings: 1, renamed: 1 });
   expect(current('old')[0].speaker).toBe('Anna S');
   expect(speakers.people().map(person => person.name)).toEqual(['Anna S']);
+});
+
+test('a whole-transcript save that relabels a speaker counts as a rename', () => {
+  const before = [{ start: 0, speaker: 0 }, { start: 1, speaker: 1 }, { start: 2, speaker: 0 }];
+  expect(impliedRenames(before, [{ start: 0, speaker: 'Joakim' }, { start: 1, speaker: 1 }, { start: 2, speaker: 'Joakim' }]))
+    .toEqual([{ op: 'rename-speaker', from: 0, to: 'Joakim' }]);
+  // Only part of a speaker's lines changed: a correction, not a rename.
+  expect(impliedRenames(before, [{ start: 0, speaker: 'Joakim' }, { start: 1, speaker: 1 }, { start: 2, speaker: 0 }])).toEqual([]);
+  // A split segment pairs the rest by start time.
+  expect(impliedRenames(before, [{ start: 0, speaker: 'Joakim' }, { start: 0.5, speaker: 'Joakim' }, { start: 1, speaker: 1 }, { start: 2, speaker: 'Joakim' }]))
+    .toEqual([{ op: 'rename-speaker', from: 0, to: 'Joakim' }]);
 });

@@ -36,13 +36,24 @@ if torch.backends.mps.is_available():
 out = pipeline({"waveform": torch.from_numpy(samples).unsqueeze(0), "sample_rate": rate})
 annotation = getattr(out, "exclusive_speaker_diarization", None) or getattr(out, "speaker_diarization", out)
 turns = [{"start": t.start, "end": t.end, "speaker": s} for t, _, s in annotation.itertracks(yield_label=True)]
-# One voiceprint per speaker, in the order of the diarization's labels; speakers with too little speech have none.
+# One voiceprint per speaker, from the audio where only they speak. The pipeline's own speaker
+# embeddings are clustering centroids that fall apart for short speech, so they are not used.
+# Speakers with under 1.5 s of speech get none; at most 120 s (longest turns first) is used.
+from pyannote.audio import Inference, Model
+embedder = Inference(Model.from_pretrained("pyannote/wespeaker-voxceleb-resnet34-LM"), window="whole")
+if torch.backends.mps.is_available():
+    embedder.to(torch.device("mps"))
 embeddings = {}
-vectors = getattr(out, "speaker_embeddings", None)
-if vectors is not None:
-    for label, vector in zip(out.speaker_diarization.labels(), vectors):
-        if np.all(np.isfinite(vector)):
-            embeddings[label] = [round(float(x), 6) for x in vector]
+for label in annotation.labels():
+    spans = sorted((t for t, _, s in annotation.itertracks(yield_label=True) if s == label), key=lambda t: -t.duration)
+    pieces, total = [], 0.0
+    for t in spans:
+        if total >= 120: break
+        pieces.append(samples[int(t.start * rate):int(t.end * rate)]); total += t.duration
+    if total < 1.5: continue
+    vector = embedder({"waveform": torch.from_numpy(np.concatenate(pieces)).unsqueeze(0), "sample_rate": rate})
+    if np.all(np.isfinite(vector)):
+        embeddings[label] = [round(float(x), 6) for x in vector]
 with open(sys.argv[2], "w") as f:
     json.dump({"turns": turns, "embeddings": embeddings}, f)
 `;

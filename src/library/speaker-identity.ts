@@ -8,15 +8,17 @@
  * used as references, so an automatic match never reinforces itself.
  *
  * Matching is deliberately strict: an unnamed speaker costs one rename, a
- * wrongly named one is trusted. Thresholds were set on synthetic voices
- * (same voice 0.81-0.93, different voices up to 0.70) and should be revisited
- * with real recordings.
+ * wrongly named one is trusted. Voiceprints are WeSpeaker embeddings of each
+ * speaker's own speech. On synthetic voices the same voice scored 0.88-0.94
+ * (0.59-0.72 against a ~1.3 s clip) and different voices at most 0.56; one real
+ * speaker scored 0.76 between a 2.5 s and a 7 s recording. Revisit with more
+ * real recordings.
  */
 import type { Database } from 'bun:sqlite';
 import { parseSegments, segmentsToText, type TranscriptOperation } from './transcript-operations';
 import { updateTranscript } from './transcript-history';
 
-export const MATCH_THRESHOLD = 0.75;
+export const MATCH_THRESHOLD = 0.65;
 export const MATCH_MARGIN = 0.1;
 
 type Label = number | string;
@@ -50,6 +52,28 @@ export function matchSpeakers(embeddings: Record<number, number[]>, references: 
     result.set(speaker, match);
   }
   return result;
+}
+
+/**
+ * Speaker renames implied by a whole-transcript save (the segment correction
+ * dialog sends every segment back). Segments are paired by position, or by
+ * start time when the count changed; a label counts as renamed only when every
+ * one of its paired segments now carries the same new label.
+ */
+export function impliedRenames(before: { start: number; speaker?: Label | null }[], after: { start: number; speaker?: Label | null }[]): TranscriptOperation[] {
+  const pairs = before.length === after.length ? before.map((segment, index) => [segment, after[index]] as const)
+    : before.flatMap(segment => { const match = after.find(other => other.start === segment.start); return match ? [[segment, match] as const] : []; });
+  const targets = new Map<string, Set<string>>();
+  for (const [old, next] of pairs) {
+    if (old.speaker === null || old.speaker === undefined) continue;
+    const set = targets.get(encode(old.speaker)) ?? new Set<string>();
+    set.add(next.speaker === null || next.speaker === undefined ? 'null' : encode(next.speaker));
+    targets.set(encode(old.speaker), set);
+  }
+  return [...targets].flatMap(([from, set]) => {
+    const [to] = [...set];
+    return set.size === 1 && to !== from && to !== 'null' ? [{ op: 'rename-speaker' as const, from: JSON.parse(from) as Label, to: JSON.parse(to) as Label }] : [];
+  });
 }
 
 export class SpeakerIdentity {

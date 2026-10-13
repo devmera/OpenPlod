@@ -10,6 +10,7 @@ import { buildInfo, buildLabel } from '@/lib/build-info'
 import { AiSettingsPanel } from '@/components/AiSettingsPanel'
 import { MeetingRecorderPanel } from '@/components/MeetingRecorderPanel'
 import { SpeakersPanel } from '@/components/SpeakersPanel'
+import { ObsidianPanel } from '@/components/ObsidianPanel'
 
 function Toggle({ checked, onChange, label, description }: { checked: boolean; onChange: (v: boolean) => void; label: string; description: string }) {
   return (
@@ -129,6 +130,8 @@ export function SettingsPage() {
       <div id="meetings" ref={meetingsSection}><MeetingRecorderPanel /></div>
 
       <SpeakersPanel />
+
+      <ObsidianPanel />
 
       {/* Sync */}
       <Card>

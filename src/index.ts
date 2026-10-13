@@ -31,6 +31,8 @@ import { SpeakerIdentity } from './library/speaker-identity';
 import { forwardRecordingWithRetry } from './library/forwarding';
 import { createAiSettingsApi } from './api/ai-settings';
 import { createSpeakersApi } from './api/speakers';
+import { createObsidianApi } from './api/obsidian';
+import { ObsidianExporter } from './library/obsidian-export';
 import { createJobsApi } from './api/jobs';
 import { createMeetingsApi } from './api/meetings';
 import { MeetingRecorder, finalizeMeeting, meetingStagingDirectory, spawnMeetingBridge } from './meetings/meeting-recorder';
@@ -181,6 +183,11 @@ app.route('/api/ai-settings', createAiSettingsApi(sqlite));
 const meetings = new MeetingRecorder({ database: sqlite, spawnBridge: spawnMeetingBridge, finalize: finalizeMeeting, stagingDirectory: meetingStagingDirectory });
 app.route('/api/meetings', createMeetingsApi(meetings));
 app.route('/api/speakers', createSpeakersApi(sqlite));
+const obsidian = new ObsidianExporter(sqlite);
+app.route('/api/obsidian', createObsidianApi(obsidian));
+// Automatic export: notes follow finished transcripts, summaries and edits within seconds.
+const exportToObsidian = () => void obsidian.run({ onlyIfAuto: true }).catch(error => console.error('[Obsidian] Export failed:', error));
+setInterval(exportToObsidian, 15000).unref();
 
 // Settings
 app.get('/api/settings', async (c) => {

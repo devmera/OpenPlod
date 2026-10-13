@@ -38,7 +38,7 @@ test('a recording made under another key is skipped once, without blocking newer
     automatic.set(true); await automatic.tick(); await automatic.tick();
     expect(attempts).toEqual([1, 2]);
     expect(automatic.status().events).toHaveLength(1);
-    expect(automatic.status().error).toMatch(/1 recording was made under a key this computer does not hold/);
+    expect(automatic.status()).toMatchObject({ error: null, skipped: 1 });
     await automatic.tick();
     expect(attempts).toEqual([1, 2]); // neither downloaded again
   } finally { db.close(); }

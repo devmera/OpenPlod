@@ -593,3 +593,6 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .summary-regenerate { margin-top: 32px; display: flex; justify-content: flex-end; }
 .summary-empty { padding: 48px 28px; text-align: center; }
 @media (max-width: 760px) { .recording-search { padding: 10px 16px; } .recording-search-results button { grid-template-columns: 1fr; gap: 2px; } .summary-document { padding: 24px 16px 40px; } }
+
+/* The code a phone shows while requesting the recorder key; compared on both screens. */
+.phone-approval-code { border: 1px solid var(--border); border-radius: 6px; background: var(--secondary); padding: 6px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 18px; font-weight: 600; letter-spacing: 0.18em; }

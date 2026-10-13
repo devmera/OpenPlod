@@ -73,9 +73,8 @@ export function PhoneAuthorization({ onDone }: { onDone: () => void }) {
   </section>
 }
 
-export function DesktopAuthorizations() {
+export function DesktopAuthorizations({ inline = false }: { inline?: boolean }) {
   const [requests, setRequests] = useState<Enrollment[]>([])
-  const [codes, setCodes] = useState<Record<string, string>>({})
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
   useEffect(() => {
@@ -86,16 +85,17 @@ export function DesktopAuthorizations() {
   }, [])
   const act = async (request: Enrollment, approve: boolean) => {
     setBusy(request.id); setError('')
-    try { await plaudRequest(`/authorizations/${request.id}${approve ? '/approve' : ''}`, approve ? { confirm: true, code: codes[request.id] || '' } : undefined, approve ? 'POST' : 'DELETE'); setRequests(rows => rows.filter(r => r.id !== request.id)) }
+    // Approving confirms the code the user compared on both screens; a request from another device shows a different code.
+    try { await plaudRequest(`/authorizations/${request.id}${approve ? '/approve' : ''}`, approve ? { confirm: true, code: request.code } : undefined, approve ? 'POST' : 'DELETE'); setRequests(rows => rows.filter(r => r.id !== request.id)) }
     catch (e) { setError((e as Error).message) } finally { setBusy('') }
   }
   return <section className="device-section" aria-label="Phone authorizations">
-    <div className="device-section-heading"><Smartphone className="size-5" /><h2>Authorize a phone</h2><Button asChild size="sm" variant="outline"><Link to="/settings#pairing"><Smartphone />Pair a phone</Link></Button></div>
-    {requests.length === 0 && <p className="device-muted">Request access from the phone's Plaud screen. Approving copies your existing device authorization, encrypted for that phone.</p>}
+    <div className="device-section-heading"><Smartphone className="size-5" /><h2>Authorize a phone</h2>{!inline && <Button asChild size="sm" variant="outline"><Link to="/android"><Smartphone />Pair a phone</Link></Button>}</div>
+    {requests.length === 0 && <p className="device-muted">After pairing, request recorder access on the phone. Approving copies your recorder key here, encrypted for that phone only.</p>}
     {requests.map(request => <div key={request.id} className="device-recording-row">
-      <span><strong>{request.name}</strong><small>Enter the six-character code displayed on that phone.</small></span>
-      <input className="w-24 min-w-0 rounded border p-2 font-mono" aria-label={`Verification code for ${request.name}`} maxLength={6} value={codes[request.id] || ''} onChange={e => setCodes(v => ({ ...v, [request.id]: e.target.value.toUpperCase() }))} />
-      <Button size="icon" title="Approve phone" aria-label="Approve phone" disabled={!!busy || codes[request.id]?.length !== 6} onClick={() => void act(request, true)}><Check /></Button>
+      <span><strong>{request.name}</strong><small>Approve only if the phone shows this same code.</small></span>
+      <code className="phone-approval-code" aria-label={`Verification code ${request.code.split('').join(' ')}`}>{request.code}</code>
+      <Button size="sm" title="Approve phone" disabled={!!busy} onClick={() => void act(request, true)}><Check />Codes match</Button>
       <Button size="icon" variant="ghost" title="Decline phone" aria-label="Decline phone" disabled={!!busy} onClick={() => void act(request, false)}><X /></Button>
     </div>)}
     {error && <p className="device-error" role="alert">{error}</p>}

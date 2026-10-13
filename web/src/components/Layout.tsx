@@ -182,7 +182,7 @@ export function Layout() {
               className={`nav-item ${location.pathname === "/android" ? "active" : ""}`}
             >
               <Smartphone />
-              <span>Android</span>
+              <span>Phone</span>
             </Link>
             <NavLink
               to="/developer"

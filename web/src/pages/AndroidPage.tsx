@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/icon-button'
 import { NoteDialog } from '@/components/NoteDialogs'
 import { apiUrl, authenticatedHeaders, forgetMobilePairing, getRuntime } from '@/lib/runtime'
+import { DesktopAuthorizations } from '@/components/PlaudAuthorization'
 import './android.css'
 
 export function AndroidPage() {
@@ -34,7 +35,7 @@ export function AndroidPage() {
     return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', hide) }
   }, [revealed])
   return <div className="android-page">
-    <header className="android-heading"><div><h1>Android</h1><span>Connections</span></div><IconButton label="Check vault connection" disabled={health === 'checking'} onClick={() => { setHealth('checking'); setCheck(v => v + 1) }}>{health === 'checking' ? <Loader2 className="animate-spin" /> : <RefreshCw />}</IconButton></header>
+    <header className="android-heading"><div><h1>Phone</h1><span>Connections</span></div><IconButton label="Check vault connection" disabled={health === 'checking'} onClick={() => { setHealth('checking'); setCheck(v => v + 1) }}>{health === 'checking' ? <Loader2 className="animate-spin" /> : <RefreshCw />}</IconButton></header>
     <div className="android-workspace">
       <section className="android-pairing" aria-labelledby="android-pairing-title">
         <div className="android-section-title"><Smartphone /><div><h2 id="android-pairing-title">{mobile ? 'Paired desktop' : 'Pair your phone'}</h2><p>{desktop ? 'Local network / Private vault' : mobile ? 'Desktop vault connection' : 'Desktop app required'}</p></div></div>
@@ -44,6 +45,8 @@ export function AndroidPage() {
             <Button variant={revealed ? 'outline' : 'default'} disabled={!canPair} onClick={() => setRevealed(v => !v)}><Smartphone />{revealed ? 'Hide pairing QR' : 'Show pairing QR'}</Button>
           </div>
           <p className="android-privacy">The pairing code grants access to your vault. Share it only with a trusted phone on your local network.</p>
+          {/* Approve the phone's key request right here, next to the QR it was paired with. */}
+          <DesktopAuthorizations inline />
           <details className="android-manual"><summary>Manual connection</summary><ConnectionValue label="Desktop address" value={runtime.lanAddress || ''} /><ConnectionValue label="Private pairing code" value={runtime.pairingToken} secret /></details>
         </> : mobile ? <>
           <ConnectionValue label="Desktop address" value={runtime.serviceOrigin} />

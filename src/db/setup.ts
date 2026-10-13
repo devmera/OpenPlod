@@ -1,7 +1,7 @@
 import { sqlite } from './client';
 import { initializeOrganizer } from '../organizer/store';
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 export function initializeDatabase() {
   sqlite.exec(`
@@ -115,6 +115,8 @@ export function initializeDatabase() {
         `);
       }
       if (version.user_version < 4) sqlite.exec('ALTER TABLE transcript_versions ADD COLUMN provenance TEXT');
+      // Voiceprint and current transcript label per diarized speaker, for naming people across recordings.
+      if (version.user_version < 5) sqlite.exec('ALTER TABLE speaker_mappings ADD COLUMN embedding TEXT; ALTER TABLE speaker_mappings ADD COLUMN label TEXT;');
       // Earlier builds could create multiple transcripts when reprocessing a recording.
       sqlite.exec(`
         DELETE FROM transcripts

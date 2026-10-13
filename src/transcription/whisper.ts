@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { z } from 'zod';
 import type { TranscriptionEngine, TranscriptionOptions, TranscriptionResult, TranscriptSegment, TranscriptWord } from './types';
 import { transcriptionFailure } from './openai';
-import { applySpeakers, diarizationAvailable, diarize, localDataDir } from './diarization';
+import { applySpeakers, diarizationAvailable, diarize, dominantSpeaker, localDataDir } from './diarization';
 
 const run = promisify(execFile);
 const binary = process.env.WHISPER_BIN || '/opt/homebrew/bin/whisper-cli';
@@ -104,6 +104,7 @@ export class WhisperEngine implements TranscriptionEngine {
         : [{ wav, fixed: undefined, first: 0 }];
       const segments: TranscriptSegment[] = [];
       let language: string | null = null;
+      const embeddings: Record<number, number[]> = {};
       for (const [index, track] of tracks.entries()) {
         stage = 'transcribing';
         options.onCheckpoint?.({ phase: stage });
@@ -112,18 +113,28 @@ export class WhisperEngine implements TranscriptionEngine {
         const result = await this.transcribeWav(track.wav, join(directory, `transcript-${index}`), modelPath, model, options, signal);
         if (speech) result.segments = keepSpeech(result.segments, speech);
         language ??= result.language;
-        if (track.fixed !== undefined) segments.push(...result.segments.map(segment => ({ ...segment, speaker: track.fixed })));
-        else if (options.diarize && result.segments.length) {
-          stage = 'diarizing';
-          options.onCheckpoint?.({ phase: stage });
-          segments.push(...applySpeakers(result.segments, await diarize(track.wav, directory, signal, track.first)));
-        } else segments.push(...result.segments);
+        if (!options.diarize || !result.segments.length) {
+          segments.push(...result.segments.map(segment => track.fixed === undefined ? segment : { ...segment, speaker: track.fixed }));
+          continue;
+        }
+        stage = 'diarizing';
+        options.onCheckpoint?.({ phase: stage });
+        const found = await diarize(track.wav, directory, signal, track.first);
+        if (track.fixed === undefined) {
+          segments.push(...applySpeakers(result.segments, found.turns));
+          Object.assign(embeddings, found.embeddings);
+        } else {
+          // The microphone channel is one known person; its main voice still teaches that person's voiceprint.
+          segments.push(...result.segments.map(segment => ({ ...segment, speaker: track.fixed })));
+          const main = dominantSpeaker(found.turns);
+          if (main !== undefined && found.embeddings[main]) embeddings[track.fixed] = found.embeddings[main];
+        }
       }
       signal.throwIfAborted();
       segments.sort((a, b) => a.start - b.start);
       const speakers = new Set(segments.map(segment => segment.speaker).filter(speaker => speaker !== undefined));
       const fullText = segments.map(s => s.text).join(' ').trim();
-      return { success: true, engine: this.name, fullText, segments, wordCount: fullText.split(/\s+/).filter(Boolean).length, speakerCount: speakers.size || null, confidence: null, duration: Math.max(0, ...segments.map(s => s.end)), metadata: { model, usage: null, language } };
+      return { success: true, engine: this.name, fullText, segments, wordCount: fullText.split(/\s+/).filter(Boolean).length, speakerCount: speakers.size || null, confidence: null, duration: Math.max(0, ...segments.map(s => s.end)), metadata: { model, usage: null, language, ...(Object.keys(embeddings).length ? { speakerEmbeddings: embeddings } : {}), ...(split ? { selfSpeaker: 0 } : {}) } };
     } catch (error) {
       if (signal.aborted) return transcriptionFailure(this.name, 'Local transcription cancelled or timed out.');
       if (stage === 'diarizing') {

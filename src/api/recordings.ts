@@ -10,6 +10,7 @@ import { db, sqlite } from '../db/client';
 import { recordings, transcripts, userSettings } from '../db/schema';
 import { SUBTITLE_MIME, isSubtitleFormat, renderSubtitles, subtitleReadiness } from '../library/subtitle-export';
 import { applyOperation, parseSegments, speakerLabels, type TranscriptOperation } from '../library/transcript-operations';
+import { SpeakerIdentity } from '../library/speaker-identity';
 import { compareVersions, type VersionRecord } from '../library/transcript-diff';
 import { createHash } from 'node:crypto';
 import { readAiConfig, textSelection } from '../ai/config';
@@ -600,6 +601,7 @@ app.post('/:id/transcript/operations', async c => {
       }});
     }
     updateTranscript({ recordingId: id, fullText, segments, revision: input.revision });
+    new SpeakerIdentity(sqlite).learn(id, input.operations as TranscriptOperation[]);
     return c.json({ success: true, data: {
       preview: false, fullText, segments, summaries, speakers: speakerLabels(segments),
     }});

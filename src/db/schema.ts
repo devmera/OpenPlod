@@ -101,6 +101,8 @@ export const speakerMappings = sqliteTable('speaker_mappings', {
   profileId: text('profile_id').references(() => speakerProfiles.id, { onDelete: 'set null' }),
   confidence: real('confidence'),
   manuallyAssigned: integer('manually_assigned', { mode: 'boolean' }).default(false).notNull(),
+  embedding: text('embedding', { mode: 'json' }).$type<number[]>(), // pyannote voiceprint
+  label: text('label'), // JSON of the speaker's current label in the transcript: a number or a name
 });
 
 // ============================================

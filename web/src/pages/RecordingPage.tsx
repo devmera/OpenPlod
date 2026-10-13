@@ -9,6 +9,7 @@ import { getRuntime } from '@/lib/runtime'
 import { latestPendingCapture, removePendingCapture, savePendingCapture, type PendingCapture } from '@/lib/recording-outbox'
 import { formatDuration } from '@/lib/utils'
 import { completePendingAndroidShare, readPendingAndroidShare } from '@/lib/android-share'
+import { confirmAction } from '@/lib/confirm'
 
 type CaptureState = 'idle' | 'requesting' | 'recording' | 'paused' | 'review' | 'uploading' | 'stored'
 
@@ -244,7 +245,7 @@ export function RecordingPage() {
   }
 
   const discard = async () => {
-    if (capture && !window.confirm('Discard this local recording?')) return
+    if (capture && !(await confirmAction('Discard this local recording?', { confirmLabel: 'Discard', destructive: true }))) return
     if (capture) await removePendingCapture(capture.id).catch(() => undefined)
     if (audioUrl) URL.revokeObjectURL(audioUrl)
     setCapture(null)
@@ -256,8 +257,8 @@ export function RecordingPage() {
     setState('idle')
   }
 
-  const goBack = () => {
-    if ((state === 'recording' || state === 'paused') && !window.confirm('Stop and leave this recording?')) return
+  const goBack = async () => {
+    if ((state === 'recording' || state === 'paused') && !(await confirmAction('Stop and leave this recording?', { confirmLabel: 'Stop and leave', destructive: true }))) return
     if (state === 'recording' || state === 'paused') stopRecording()
     navigate('/')
   }

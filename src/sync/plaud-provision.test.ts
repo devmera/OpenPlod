@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  BINDING_TOKEN_PATTERN, PlaudIdentityProvisioner, clearStoredIdentity, deviceTypeForSerial,
-  identityFilePath, normalizeAccessToken, parseAccessToken, provisionWithDeveloperCredentials,
-  readStoredIdentity, writeStoredIdentity,
+  BINDING_TOKEN_PATTERN, PlaudIdentityProvisioner, clearPendingIdentity, clearStoredIdentity, deviceTypeForSerial,
+  generateLocalKeyPair, identityFilePath, normalizeAccessToken, parseAccessToken, parseDeviceIdentity,
+  pendingIdentityFilePath, previousIdentityFilePath, provisionWithDeveloperCredentials, readPendingIdentity,
+  readStoredIdentity, replaceStoredIdentity, writePendingIdentity, writeStoredIdentity,
 } from './plaud-provision';
+import { bindFailure } from './plaud-direct';
 
 const SERIAL = '8810B50327175322';
 const MAC = 'C4:96:9D:11:27:21';
@@ -91,7 +95,7 @@ describe('PlaudIdentityProvisioner', () => {
     const identity = await provisioner.provision({ token: accessToken, serial: SERIAL, identifier: MAC });
     expect(identity).toEqual({
       identifier: MAC, serial: SERIAL, bindingToken: BINDING_TOKEN,
-      publicKey: 'PUBLIC', privateKey: 'PRIVATE', signature: 'SIGNATURE', deviceType: 'notepro',
+      publicKey: 'PUBLIC', privateKey: 'PRIVATE', signature: 'SIGNATURE', deviceType: 'notepro', keySource: 'plaud',
     });
     expect(requests.map(request => new URL(request.url).pathname)).toEqual([
       '/developer/api/open/partner/sdk/gen-key',
@@ -185,5 +189,100 @@ describe('provisionWithDeveloperCredentials', () => {
       serial: SERIAL, identifier: MAC,
       credentials: { clientId: '', clientSecret: '', userId: 'owner', domain: 'platform-us.plaud.ai' },
     })).rejects.toThrow(/client ID and secret/);
+  });
+});
+
+describe('locally generated keys', () => {
+  const signature = Buffer.alloc(256, 7).toString('base64');
+  const identityFor = (keys: { publicKey: string; privateKey: string }, keySource: 'local' | 'plaud' = 'local') => ({
+    identifier: MAC, serial: SERIAL, bindingToken: BINDING_TOKEN, signature, ...keys, keySource,
+  });
+  const withTemporaryIdentity = async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'openplod-local-key-'));
+    temporaryPaths.push(directory);
+    process.env.OPENPLOD_DEVICE_IDENTITY = join(directory, 'plaud-device.json');
+  };
+
+  test('generates an RSA-2048 pair in the shapes the recorder and bridge expect', () => {
+    const { publicKey, privateKey } = generateLocalKeyPair();
+    expect(publicKey).toStartWith('-----BEGIN PUBLIC KEY-----\n');
+    const priv = createPrivateKey({ key: Buffer.from(privateKey, 'base64'), format: 'der', type: 'pkcs8' });
+    const pub = createPublicKey(publicKey);
+    expect(pub.asymmetricKeyDetails?.modulusLength).toBe(2048);
+    const proof = sign('sha256', Buffer.from('PLAUD.AI'), priv);
+    expect(verify('sha256', Buffer.from('PLAUD.AI'), pub, proof)).toBe(true);
+    expect(generateLocalKeyPair().privateKey).not.toBe(privateKey);
+  });
+
+  test('asks Plaud only for the serial signature and reuses a pending key on retry', async () => {
+    const paths: string[] = [];
+    const provisioner = new PlaudIdentityProvisioner(async url => {
+      paths.push(new URL(url).pathname);
+      return jsonResponse(200, { signature: 'SIGNATURE' });
+    });
+    const identity = await provisioner.provision({ token: token({ sub: BINDING_TOKEN }), serial: SERIAL, identifier: MAC, keySource: 'local' });
+    expect(paths).toEqual(['/developer/api/open/partner/sdk/sn-sign']);
+    expect(identity).toMatchObject({ keySource: 'local', signature: 'SIGNATURE', bindingToken: BINDING_TOKEN });
+    expect(identity.publicKey).toStartWith('-----BEGIN PUBLIC KEY-----');
+
+    const retried = await provisioner.provision({
+      token: token({ sub: BINDING_TOKEN }), serial: SERIAL, identifier: MAC, keySource: 'local',
+      localKeys: { publicKey: identity.publicKey, privateKey: identity.privateKey },
+    });
+    expect(retried.privateKey).toBe(identity.privateKey);
+  });
+
+  test('validates imported identities', () => {
+    const keys = generateLocalKeyPair();
+    const parsed = parseDeviceIdentity({ ...identityFor(keys), serial: SERIAL.toLowerCase(), keySource: undefined });
+    expect(parsed).toMatchObject({ serial: SERIAL, keySource: 'local', privateKey: keys.privateKey });
+    expect(parseDeviceIdentity(identityFor(keys, 'plaud')).keySource).toBe('plaud');
+    expect(() => parseDeviceIdentity(null)).toThrow(/Bluetooth address/);
+    expect(() => parseDeviceIdentity({ ...identityFor(keys), serial: 'nope' })).toThrow(/serial/);
+    expect(() => parseDeviceIdentity({ ...identityFor(keys), signature: 'c2hvcnQ=' })).toThrow(/signature/);
+    expect(() => parseDeviceIdentity({ ...identityFor(keys), publicKey: 'PUBLIC' })).toThrow(/PEM/);
+    expect(() => parseDeviceIdentity({ ...identityFor(keys), privateKey: 'not base64!' })).toThrow(/private key/);
+  });
+
+  test('never overwrites a different identity and never deletes a local key', async () => {
+    await withTemporaryIdentity();
+    const first = identityFor(generateLocalKeyPair()), second = identityFor(generateLocalKeyPair());
+    expect(await replaceStoredIdentity(first)).toEqual({ previousKept: false });
+    expect(await replaceStoredIdentity(first)).toEqual({ previousKept: false });
+    expect(await replaceStoredIdentity(second)).toEqual({ previousKept: true });
+    expect((await readStoredIdentity())?.privateKey).toBe(second.privateKey);
+    expect(JSON.parse(await readFile(previousIdentityFilePath(), 'utf8')).privateKey).toBe(first.privateKey);
+    expect((await stat(previousIdentityFilePath())).mode & 0o777).toBe(0o600);
+
+    expect(await clearStoredIdentity()).toBe(true);
+    expect(existsSync(identityFilePath())).toBe(false);
+    expect(JSON.parse(await readFile(previousIdentityFilePath(), 'utf8')).privateKey).toBe(second.privateKey);
+
+    await writeStoredIdentity(identityFor(generateLocalKeyPair(), 'plaud'));
+    await clearStoredIdentity();
+    expect(JSON.parse(await readFile(previousIdentityFilePath(), 'utf8')).privateKey).toBe(second.privateKey);
+  });
+
+  test('keeps a pending key private until the bind is confirmed', async () => {
+    await withTemporaryIdentity();
+    expect(await readPendingIdentity()).toBeNull();
+    const pending = { ...identityFor(generateLocalKeyPair()), deviceType: 'notepro' };
+    await writePendingIdentity(pending);
+    expect((await stat(pendingIdentityFilePath())).mode & 0o777).toBe(0o600);
+    expect(await readPendingIdentity()).toEqual(pending);
+    expect(await readStoredIdentity()).toBeNull();
+    await clearPendingIdentity();
+    expect(await readPendingIdentity()).toBeNull();
+  });
+
+  test('explains a recorder that is still linked to another key', () => {
+    const linked = bindFailure('Bluetooth rsa-decrypt failed', false);
+    expect(linked.keyRequested).toBe(false);
+    expect(linked.message).toMatch(/still linked to another key.*Unlink it in the Plaud app/);
+    expect(bindFailure('Plaud key-exchange verification failed', false).message).toMatch(/still linked/);
+    expect(bindFailure('Timed out waiting for the recorder', false).message).toBe('Timed out waiting for the recorder');
+    const interrupted = bindFailure('disconnected', true);
+    expect(interrupted.keyRequested).toBe(true);
+    expect(interrupted.message).toMatch(/key is kept on this computer/);
   });
 });

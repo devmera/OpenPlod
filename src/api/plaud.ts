@@ -14,7 +14,9 @@ import { queueRecordingProcessing } from '../library/processing';
 import { saveGeneratedTranscript } from '../library/transcript-history';
 import { FolderWatcher } from '../sync/folder-watcher';
 import { scanDesktopPlaud } from '../sync/desktop-plaud';
-import { cancelDirectPlaud, directPlaudConfigured, importDirectPlaudRecording, readDirectPlaudRecordings } from '../sync/plaud-direct';
+import {
+  PlaudBindError, bindDirectPlaudIdentity, cancelDirectPlaud, directPlaudConfigured, importDirectPlaudRecording, readDirectPlaudRecordings,
+} from '../sync/plaud-direct';
 import { readDeviceCredentials } from '../sync/plaud-device-auth';
 import { isBluetoothIdentifier } from '../sync/plaud-bridge';
 import { detectPlaudEnvironment, type PlaudEnvironment } from '../sync/plaud-environment';
@@ -23,9 +25,9 @@ import {
   writeStoredCloudToken, type PlaudCloudRecording,
 } from '../sync/plaud-cloud';
 import {
-  DEFAULT_PLAUD_DOMAIN, PLAUD_DOMAINS, PlaudIdentityProvisioner, clearStoredIdentity, deviceTypeForSerial,
-  identityFilePath, isPlaudDomain, provisionWithDeveloperCredentials, readStoredIdentity, writeStoredIdentity,
-  type ProvisionedIdentity,
+  DEFAULT_PLAUD_DOMAIN, PLAUD_DOMAINS, PlaudIdentityProvisioner, clearPendingIdentity, clearStoredIdentity, deviceTypeForSerial,
+  identityFilePath, isPlaudDomain, parseDeviceIdentity, provisionWithDeveloperCredentials, readPendingIdentity, readStoredIdentity,
+  replaceStoredIdentity, writePendingIdentity, writeStoredIdentity, type KeySource, type ProvisionedIdentity,
 } from '../sync/plaud-provision';
 
 const app = new Hono();
@@ -381,6 +383,7 @@ const authorizationError = (error: unknown) => error instanceof Error ? error.me
 
 // The recorder identity is a secret (it holds a private key), so it is never cached.
 app.use('/identity', async (c, next) => { c.header('Cache-Control', 'no-store'); return next(); });
+app.use('/identity/*', async (c, next) => { c.header('Cache-Control', 'no-store'); return next(); });
 
 app.get('/identity', async c => {
   const identity = await readStoredIdentity();
@@ -390,6 +393,9 @@ app.get('/identity', async c => {
     serial: identity?.serial ?? null,
     identifier: identity?.identifier ?? null,
     deviceType: identity && /^[0-9A-F]{16}$/.test(identity.serial) ? deviceTypeForSerial(identity.serial) : null,
+    keySource: identity ? identity.keySource ?? 'plaud' : null,
+    // A local key the recorder may already hold: authorizing again finishes the bind with it.
+    bindPending: Boolean(await readPendingIdentity()),
     developerCredentialsAvailable: Boolean(credentials.clientId && credentials.clientSecret),
     domains: PLAUD_DOMAINS,
     identityPath: identityFilePath(),
@@ -399,7 +405,7 @@ app.get('/identity', async c => {
 // Mint a device identity for this recorder. Either paste a Plaud sign-in token,
 // or leave it out to use Plaud developer credentials when they are configured.
 app.post('/identity', async c => {
-  let body: { token?: string; domain?: string; serial?: string; identifier?: string };
+  let body: { token?: string; domain?: string; serial?: string; identifier?: string; keySource?: KeySource };
   try { body = await c.req.json(); }
   catch { return c.json({ success: false, error: 'Invalid authorization request.' }, 400); }
   try {
@@ -413,12 +419,45 @@ app.post('/identity', async c => {
     if (!serial) throw new Error('Scan the recorder first so its serial number can be read.');
     if (!identifier) throw new Error('Scan the recorder first so its Bluetooth address can be read.');
     const domain = typeof body.domain === 'string' && isPlaudDomain(body.domain) ? body.domain : DEFAULT_PLAUD_DOMAIN;
+    const keySource: KeySource = body.keySource === 'local' ? 'local' : 'plaud';
+    // Retrying an interrupted local bind must offer the same key: the recorder may already hold it.
+    const pending = keySource === 'local' ? await readPendingIdentity() : null;
+    const localKeys = pending?.serial === serial ? { publicKey: pending.publicKey, privateKey: pending.privateKey } : undefined;
     const identity: ProvisionedIdentity = body.token?.trim()
-      ? await new PlaudIdentityProvisioner().provision({ token: body.token, serial, identifier, domain })
-      : await provisionWithDeveloperCredentials({ serial, identifier, domain });
-    await writeStoredIdentity(identity);
+      ? await new PlaudIdentityProvisioner().provision({ token: body.token, serial, identifier, domain, keySource, localKeys })
+      : await provisionWithDeveloperCredentials({ serial, identifier, domain, keySource, localKeys });
+    if (keySource === 'plaud') {
+      await writeStoredIdentity(identity);
+    } else {
+      // The private key exists only here, so it is on disk before the recorder can store its half.
+      await writePendingIdentity(identity);
+      try { await bindDirectPlaudIdentity(identity); }
+      catch (error) {
+        if (!(error instanceof PlaudBindError && error.keyRequested)) await clearPendingIdentity();
+        throw error;
+      }
+      await replaceStoredIdentity(identity);
+      await clearPendingIdentity();
+    }
     return c.json({ success: true, data: {
-      authorized: true, serial: identity.serial, identifier: identity.identifier, deviceType: identity.deviceType,
+      authorized: true, serial: identity.serial, identifier: identity.identifier, deviceType: identity.deviceType, keySource,
+    }});
+  } catch (error) { return c.json({ success: false, error: authorizationError(error) }, 400); }
+});
+
+// Bring an identity from another tool (for example a recorder already bound to a
+// key generated elsewhere). It replaces the current one only after validation,
+// and a different current identity is kept beside it rather than overwritten.
+app.post('/identity/import', async c => {
+  let body: { identity?: unknown };
+  try { body = await c.req.json(); }
+  catch { return c.json({ success: false, error: 'Invalid identity file.' }, 400); }
+  try {
+    const identity = parseDeviceIdentity(body.identity);
+    const { previousKept } = await replaceStoredIdentity(identity);
+    return c.json({ success: true, data: {
+      authorized: directPlaudConfigured(), serial: identity.serial, identifier: identity.identifier,
+      deviceType: deviceTypeForSerial(identity.serial), keySource: identity.keySource, previousKept,
     }});
   } catch (error) { return c.json({ success: false, error: authorizationError(error) }, 400); }
 });

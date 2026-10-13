@@ -266,6 +266,18 @@ The private identity contains the peripheral identifier, device serial, binding 
 
 The file must be private to the current user with permissions `0600`. For a source-run backend, `OPENPLOD_DEVICE_IDENTITY` can select an absolute path. The identity is portable: on Linux and Windows the bridge matches the recorder by its advertised Plaud service or name when the stored identifier is a CoreBluetooth UUID that does not appear in the platform's own address space. No identity, account password, embedded vendor secret, or APK is distributed in this repository. Generating a random token or using Android developer credentials does not provision this desktop identity.
 
+##### Keys Generated on This Computer
+
+The authorization panel can generate the recorder's RSA-2048 user key locally instead of requesting it from Plaud's `gen-key`. Plaud still signs the serial number (`sn-sign`), because the recorder verifies that signature on every connection, bound or not. The private key never leaves this computer, and Plaud does not hold a copy.
+
+This uses only the normal handshake. A recorder with no stored user key asks the client for one (`0xFE11`) and stores the key it receives, which is how the official app binds a recorder. A recorder still linked to another key does not ask, so the local key is refused and nothing changes. OpenPlod never sends force-clear and never resets ownership; to switch to a local key, unlink the recorder in the Plaud app first and choose to keep recordings.
+
+The bind is confirmed before anything is saved. The new identity is written to `plaud-device.pending.json` first, so a recorder that stored the key during an interrupted connection can still be reached; authorizing again finishes the bind with the same key. A different identity that is being replaced, or a local identity that is removed, is moved to `plaud-device.previous.json` rather than deleted. **Back up `plaud-device.json` when it holds a local key**: it is the only copy, and while the recorder is bound to it the Plaud app cannot connect or unlink it.
+
+Each recording's file key is encrypted to the user key that was active when it was recorded. Import recordings before changing keys: files recorded under an earlier key can only be decrypted with that key (kept in `plaud-device.previous.json` when OpenPlod replaced it). Unlinking may also remove the recordings from the recorder, depending on the option chosen in the Plaud app.
+
+An identity created by another tool can be imported from the same panel. It is validated and replaces the current identity, which is kept as `plaud-device.previous.json`.
+
 **Fresh-install limitation:** obtaining this identity is not yet a supported in-app onboarding flow. Until that is implemented, a new user can use the recording vault and file imports but should not expect plug-and-play Plaud extraction. Do not reset or rebind a device to work around authorization errors.
 
 ### Transcription and Exports

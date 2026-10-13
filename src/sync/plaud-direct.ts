@@ -33,12 +33,18 @@ export async function loadIdentity(): Promise<DeviceIdentity> {
   return identity;
 }
 
-async function withDevice<T>(operation: (connection: PlaudConnection, identity: DeviceIdentity, signal: AbortSignal) => Promise<T>): Promise<T> {
+async function withDevice<T>(
+  operation: (connection: PlaudConnection, identity: DeviceIdentity, signal: AbortSignal) => Promise<T>,
+  candidate?: DeviceIdentity,
+  onStage?: (stage: string) => void,
+): Promise<T> {
   if (active) throw new Error('A Plaud Bluetooth operation is already running');
-  if (!directPlaudConfigured()) throw new Error('Authorize this Plaud recorder on this computer before connecting');
+  if (candidate ? !(isDesktopPlatform() && bluetoothSupported()) : !directPlaudConfigured()) {
+    throw new Error('Authorize this Plaud recorder on this computer before connecting');
+  }
   const controller = new AbortController(); active = controller;
   try {
-    const identity = await loadIdentity();
+    const identity = candidate ?? await loadIdentity();
     for (let attempt = 0; attempt < 2; attempt++) {
       controller.signal.throwIfAborted();
       const transport = new PlaudTransport(identity.identifier);
@@ -47,7 +53,7 @@ async function withDevice<T>(operation: (connection: PlaudConnection, identity: 
       controller.signal.addEventListener('abort', abort, { once: true });
       try {
         await transport.wait(event => event.event === 'ready', 45000);
-        await connection.establishEncryption(identity);
+        await connection.establishEncryption(identity, onStage);
         await recordingHandshake(connection, identity.bindingToken);
         return await operation(connection, identity, controller.signal);
       } catch (error) {
@@ -60,6 +66,40 @@ async function withDevice<T>(operation: (connection: PlaudConnection, identity: 
     }
     throw new Error('Plaud connection failed after one fresh retry');
   } finally { active = null; }
+}
+
+/** Why binding a locally generated key did not complete. */
+export class PlaudBindError extends Error {
+  constructor(message: string, readonly keyRequested: boolean) { super(message); }
+}
+
+/**
+ * Connects with an identity that is not saved yet and proves the recorder
+ * accepts it. An unlinked recorder asks for a user key (`0xFE11`), stores the
+ * one offered and wraps the session to it; a recorder linked to another key
+ * skips that request and wraps the session to its stored key, which this
+ * identity cannot unwrap. Nothing else is written to the recorder.
+ */
+export async function bindDirectPlaudIdentity(identity: DeviceIdentity): Promise<{ keyRequested: boolean }> {
+  let keyRequested = false;
+  try {
+    await withDevice(async () => undefined, identity, stage => {
+      if (stage === 'identity_accepted_sending_public_key') keyRequested = true;
+    });
+    return { keyRequested };
+  } catch (error) {
+    throw bindFailure(error instanceof Error ? error.message : String(error), keyRequested);
+  }
+}
+
+/** Turns a failed bind into the action the owner should take. */
+export function bindFailure(message: string, keyRequested: boolean): PlaudBindError {
+  if (!keyRequested && /rsa-decrypt|key-exchange verification/i.test(message)) {
+    return new PlaudBindError('This recorder is still linked to another key, so it kept that key. Unlink it in the Plaud app first (choose to keep recordings), then authorize again.', false);
+  }
+  return new PlaudBindError(keyRequested
+    ? `The recorder asked for the new key but the connection did not finish (${message}). The key is kept on this computer; wake the recorder and authorize again to finish.`
+    : message, keyRequested);
 }
 
 export async function readDirectPlaudRecordings() {

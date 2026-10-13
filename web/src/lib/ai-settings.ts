@@ -3,6 +3,11 @@ import type { speechCapabilities } from '../../../src/ai/capabilities'
 import { apiUrl, authenticatedHeaders } from './runtime'
 export type { AiConfig, SpeechProvider, TextProvider }
 export type AiSettings = AiConfig & { credentials: Record<string, boolean>; capabilities: typeof speechCapabilities }
+/** Transcription language choices, shared by Settings and the per-recording dialog. Whisper accepts all of them; codes are ISO 639-1. */
+export const transcriptionLanguages: [code: string, label: string][] = [
+  ['auto', 'Detect automatically'],
+  ...([['ar', 'Arabic'], ['zh', 'Chinese'], ['cs', 'Czech'], ['da', 'Danish'], ['nl', 'Dutch'], ['en', 'English'], ['fi', 'Finnish'], ['fr', 'French'], ['de', 'German'], ['el', 'Greek'], ['hi', 'Hindi'], ['hu', 'Hungarian'], ['is', 'Icelandic'], ['id', 'Indonesian'], ['it', 'Italian'], ['ja', 'Japanese'], ['ko', 'Korean'], ['no', 'Norwegian'], ['pl', 'Polish'], ['pt', 'Portuguese'], ['ro', 'Romanian'], ['ru', 'Russian'], ['es', 'Spanish'], ['sv', 'Swedish'], ['th', 'Thai'], ['tr', 'Turkish'], ['uk', 'Ukrainian'], ['vi', 'Vietnamese']] as [string, string][]),
+]
 export type ProcessingJob = { id: string; recordingId: string; provider?: string; status: string; error?: string; priority: number; checkpoint?: { phase: string; remoteId?: string } }
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(apiUrl(path), { method, headers: authenticatedHeaders({ 'Content-Type': 'application/json' }), ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(15000) })

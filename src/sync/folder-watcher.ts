@@ -4,13 +4,14 @@
  * Files stay on disk; we just track them in SQLite.
  */
 
-import { watch, existsSync, unlinkSync } from 'fs';
+import { watch, existsSync, readFileSync, unlinkSync } from 'fs';
+import { z } from 'zod';
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'path';
 import { db } from '../db/client';
 import { userSettings } from '../db/schema';
 import { eq } from 'drizzle-orm';
-import { importRecordingFile, inferRecordingType, isSupportedAudio } from '../library/recording-library';
+import { importRecordingFile, inferRecordingType, isSupportedAudio, type RecordingProvenance } from '../library/recording-library';
 import { queueRecordingProcessing } from '../library/processing';
 
 export interface PlaudRecording {
@@ -37,6 +38,29 @@ function recordingTypeSelected(filePath: string, setting: string | undefined): b
     return Array.isArray(selected) && selected.includes(inferRecordingType(filePath));
   } catch {
     return true;
+  }
+}
+
+/**
+ * `<audio>.openplod.json`, written beside a recording by the OpenPlod iOS companion when it uploads
+ * to a shared folder (e.g. a NAS). It carries the recorder's own source id, so a recording that also
+ * arrives through the Mac's Bluetooth sync is stored once, with its real start time.
+ */
+const companionSidecarSchema = z.object({
+  type: z.literal('openplod-recording'),
+  version: z.literal(1),
+  sourceProvider: z.literal('plaud'),
+  sourceRecordingId: z.string().regex(/^[0-9A-F]{16}:\d{1,10}$/),
+  recordedAt: z.string().datetime(),
+});
+export const companionSidecarPath = (audioPath: string) => `${audioPath}.openplod.json`;
+
+export function folderProvenance(audioPath: string): RecordingProvenance {
+  try {
+    const sidecar = companionSidecarSchema.parse(JSON.parse(readFileSync(companionSidecarPath(audioPath), 'utf8')));
+    return { sourceProvider: 'plaud', sourceTransport: 'phone', sourceRecordingId: sidecar.sourceRecordingId, recordedAt: sidecar.recordedAt };
+  } catch {
+    return { sourceProvider: 'plaud', sourceTransport: 'folder' };
   }
 }
 
@@ -131,7 +155,7 @@ export class FolderWatcher {
     try {
       const imported = await importRecordingFile({
         sourcePath: filePath,
-        provenance: { sourceProvider: 'plaud', sourceTransport: 'folder' },
+        provenance: folderProvenance(filePath),
       });
       if (!imported.added) {
         this.processedFiles.add(filePath);
@@ -148,7 +172,10 @@ export class FolderWatcher {
       });
       console.log(`[FolderWatcher] Imported recording ${recording.id}; processing route: ${route}`);
       const deleteSource = settings ? settings.deleteSourceAfterImport === 'true' : await this.shouldDeleteSourceAfterImport();
-      if (deleteSource) unlinkSync(filePath);
+      if (deleteSource) {
+        unlinkSync(filePath);
+        if (existsSync(companionSidecarPath(filePath))) unlinkSync(companionSidecarPath(filePath));
+      }
       return true;
     } finally {
       this.pendingFiles.delete(filePath);

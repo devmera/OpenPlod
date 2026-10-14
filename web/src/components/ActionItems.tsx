@@ -28,7 +28,7 @@ const time = (iso: string) => new Date(iso).toLocaleString(undefined, { month: '
  * grouped by owner with the Todoist connection and each task's sync state; otherwise a flat list.
  * `version` reloads the list after a new summary.
  */
-export function ActionItems({ recordingId, version, full = false, summarized = true }: { recordingId: string; version?: string | null; full?: boolean; summarized?: boolean }) {
+export function ActionItems({ recordingId, version, full = false, summarized = true, error }: { recordingId: string; version?: string | null; full?: boolean; summarized?: boolean; error?: string | null }) {
   const [items, setItems] = useState<ActionItem[] | null>(null), [status, setStatus] = useState<Status | null>(null)
   const [busy, setBusy] = useState<string | null>(null), [notice, setNotice] = useState('')
   const load = useCallback(async () => {
@@ -50,7 +50,8 @@ export function ActionItems({ recordingId, version, full = false, summarized = t
   const connected = Boolean(status?.settings.connected), auto = connected && Boolean(status?.settings.auto)
   if (items === null) return full ? <div className="action-items-empty"><Loader2 className="animate-spin" /></div> : null
   if (!items.length) return full ? <div className="action-items-empty"><ListChecks />
-    <p>{summarized ? 'No tasks were identified in this recording.' : 'This recording has not been summarized yet.'}</p>
+    <p>{error ? 'The last summary failed, so no tasks were saved.' : summarized ? 'No tasks were identified in this recording.' : 'This recording has not been summarized yet.'}</p>
+    {error && <small role="alert" className="action-items-error">{error}</small>}
     <small>{summarized ? 'Summarize again to look for tasks once more.' : 'Tasks are found when the recording is summarized.'}</small>
     <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => void summarize()}>{busy === 'summarize' ? <Loader2 className="animate-spin" /> : <AlignLeft />}{summarized ? 'Summarize again' : 'Summarize'}</Button>
     {notice && <small role="status">{notice}</small>}

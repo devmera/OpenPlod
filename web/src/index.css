@@ -665,3 +665,4 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .preview-summary-again { display: flex; justify-content: flex-end; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 8px; }
 .preview-summary-again button { gap: 6px; color: var(--muted-foreground); }
 .preview-summary-failed { margin: 0 0 12px; border: 1px solid color-mix(in srgb, var(--destructive) 40%, transparent); border-radius: 8px; padding: 8px 10px; color: var(--destructive); font-size: 12px; }
+.action-items-error { color: var(--destructive); }

@@ -15,7 +15,7 @@ test('legacy Mistral settings migrate without cloud fallback or English defaults
   expect(readAiConfig(db)).toMatchObject({ transcriptionEngine: 'mistral', transcriptionLanguage: 'auto', transcriptionFallback: [], documentProvider: 'mistral' }); db.close();
 });
 test('atomic settings reject invalid options, redact keys and enforce local-only across tasks', async () => {
-  const db = database(), api = createAiSettingsApi(db), config = aiConfigSchema.parse({});
+  const db = database(), api = createAiSettingsApi(db, fakeFetch(async () => new Response('{}'))), config = aiConfigSchema.parse({});
   const put = (body: unknown) => api.request('/', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   expect((await put({ ...config, credentials: { openaiApiKey: 'synthetic-secret' } })).status).toBe(200);
   const result = await (await api.request('/')).text(); expect(result).not.toContain('synthetic-secret'); expect(result).toContain('openaiApiKey');

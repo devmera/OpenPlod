@@ -1,5 +1,5 @@
 import {
-  buildDownloadRequest, buildHandshake, buildSessionRequest, buildUnlinkRequest, parseSessionPage, parseUnlinkResponse,
+  buildDeleteRequest, buildDownloadRequest, buildHandshake, buildSessionRequest, buildUnlinkRequest, parseDeleteResponse, parseSessionPage, parseUnlinkResponse,
   type PlaudSessionEntry,
 } from './plaud-protocol';
 
@@ -136,6 +136,23 @@ export async function listPlaudSessions(connection: PlaudPackets, protocol = 20)
     if (sessions) return sessions;
   }
   throw new Error('Recording list timeout; device recording count is unknown');
+}
+
+/**
+ * Deletes one recording and waits for the recorder's answer. A nonzero status is a refusal. Without an
+ * answer the outcome is unknown; callers list the recorder again to see whether the recording is gone.
+ */
+export async function deletePlaudSession(connection: PlaudPackets, sessionId: number): Promise<{ confirmed: boolean }> {
+  await connection.write(buildDeleteRequest(sessionId));
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    let reply;
+    try { reply = parseDeleteResponse(await connection.packet(deadline - Date.now())); } catch { break; }
+    if (!reply || (reply.sessionId !== null && reply.sessionId !== sessionId)) continue;
+    if (reply.status !== 0) throw new Error(`The recorder refused to delete the recording (status ${reply.status}).`);
+    return { confirmed: true };
+  }
+  return { confirmed: false };
 }
 
 export async function downloadPlaudSession(connection: PlaudPackets, session: PlaudSessionEntry,

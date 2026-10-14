@@ -794,6 +794,13 @@ export const api = {
     }
     throw new Error('Import status timed out. Check the library before retrying.')
   },
+  /** Deletes recordings from the recorder; the server refuses any it does not hold a verified copy of. */
+  deleteDeviceRecordings: async (sessionIds: number[], signal?: AbortSignal): Promise<{ sessionId: number; deleted: boolean; reason?: string }[]> => {
+    const res = await fetchJSON<ApiEnvelope<{ sessionId: number; deleted: boolean; reason?: string }[]>>('/plaud/device-delete', {
+      method: 'POST', body: JSON.stringify({ sessionIds, confirm: true }), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(180000)]) : AbortSignal.timeout(180000),
+    })
+    return res.data
+  },
   cancelDeviceOperation: () => fetchJSON('/plaud/device-cancel', { method: 'POST', signal: AbortSignal.timeout(10000) }),
 
   getPlaudIdentity: async (signal?: AbortSignal): Promise<PlaudIdentityStatus> => {

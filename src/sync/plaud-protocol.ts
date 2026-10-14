@@ -1,5 +1,5 @@
 // Interoperability framing verified against APK builders/parsers; no device writes here.
-export const PLAUD_COMMAND = { handshake: 1, depair: 5, sessions: 26, download: 28, tail: 29,
+export const PLAUD_COMMAND = { handshake: 1, depair: 5, sessions: 26, download: 28, tail: 29, deleteSession: 30,
   signature: 0xfe10, signatureAccepted: 0xfe11, publicKey: 0xfe12 } as const;
 
 export function parseNoteProAdvertisement(data: Uint8Array) {
@@ -63,6 +63,22 @@ export function buildDownloadRequest(options: { sessionId: number; offset: numbe
   return command(PLAUD_COMMAND.download, Buffer.concat([
     uint32(options.sessionId), uint32(options.offset), uint32(options.end),
   ]));
+}
+
+/**
+ * Delete one recording from the recorder: `01 1E 00 ‖ sessionId u32` (SDK `w6`, SyncRecFileDel). The
+ * official SDK sends this after each completed download. This is the only destructive command built
+ * here; delete-all (104) and depair-with-clear are deliberately not.
+ */
+export function buildDeleteRequest(sessionId: number): Buffer {
+  return command(PLAUD_COMMAND.deleteSession, uint32(sessionId));
+}
+
+/** A delete reply (SDK `x6`): `01 1E 00 ‖ sessionId u32 ‖ status u8` from port 7, `01 1E 00 ‖ status u8` before. */
+export function parseDeleteResponse(packet: Uint8Array): { sessionId: number | null; status: number } | null {
+  const bytes = Buffer.from(packet);
+  if (bytes.length < 4 || bytes[0] !== 1 || bytes.readUInt16LE(1) !== PLAUD_COMMAND.deleteSession) return null;
+  return bytes.length >= 8 ? { sessionId: bytes.readUInt32LE(3), status: bytes[7]! } : { sessionId: null, status: bytes[3]! };
 }
 
 export function buildPreHandshakeChunks(opcode: number, payload: Uint8Array): Buffer[] {

@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { PlaudConnection, type PlaudIdentity } from './plaud-connection';
 import { PlaudTransport } from './plaud-transport';
 import { decodePlaudAudio } from './plaud-audio';
-import { downloadPlaudSession, listPlaudSessions, recordingHandshake, unlinkRecorder } from './plaud-transfer';
+import { deletePlaudSession, downloadPlaudSession, listPlaudSessions, recordingHandshake, unlinkRecorder } from './plaud-transfer';
 import { plaudTransfers, type PlaudTransferPhase } from './plaud-transfers';
 import type { PlaudSessionEntry } from './plaud-protocol';
 import { fingerprintFile, importRecordingFile } from '../library/recording-library';
@@ -133,6 +133,37 @@ export async function readDirectPlaudRecordings(options: { settleMs?: number } =
       stable = sessions.filter(session => first.get(session.sessionId) === session.size).map(session => session.sessionId);
     }
     return { serial: identity.serial, sessions, stable, checkedAt: new Date().toISOString() };
+  });
+}
+
+export type DeleteOutcome = { sessionId: number; deleted: boolean; reason?: string };
+
+/**
+ * Deletes recordings from the recorder, each only after `verify` confirms OpenPlod holds a complete copy
+ * of exactly that file; `verify` returns why not otherwise. Every deletion is confirmed by listing the
+ * recorder again, so a recording reported deleted is really gone and one reported kept is still there.
+ */
+export async function deleteDirectPlaudRecordings(sessionIds: number[], verify: (serial: string, session: PlaudSessionEntry) => Promise<string | null>): Promise<DeleteOutcome[]> {
+  if (!sessionIds.length || sessionIds.some(id => !Number.isSafeInteger(id) || id < 0 || id > 0xffffffff)) throw new Error('Invalid Plaud session ID');
+  return withDevice(async (connection, identity, signal) => {
+    const outcomes = new Map<number, DeleteOutcome>();
+    const present = await listPlaudSessions(connection);
+    for (const sessionId of sessionIds) {
+      signal.throwIfAborted();
+      const session = present.find(item => item.sessionId === sessionId);
+      // Already absent, e.g. deleted before a dropped connection was retried.
+      if (!session) { outcomes.set(sessionId, { sessionId, deleted: true }); continue; }
+      const refusal = await verify(identity.serial, session);
+      if (refusal) { outcomes.set(sessionId, { sessionId, deleted: false, reason: refusal }); continue; }
+      try { await deletePlaudSession(connection, sessionId); }
+      catch (error) { outcomes.set(sessionId, { sessionId, deleted: false, reason: error instanceof Error ? error.message : 'Delete failed' }); }
+    }
+    const remaining = new Set((await listPlaudSessions(connection)).map(session => session.sessionId));
+    return sessionIds.map(sessionId => {
+      const outcome = outcomes.get(sessionId);
+      if (outcome && !outcome.deleted) return outcome;
+      return remaining.has(sessionId) ? { sessionId, deleted: false, reason: 'The recorder still lists this recording.' } : { sessionId, deleted: true };
+    });
   });
 }
 

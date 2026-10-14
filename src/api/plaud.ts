@@ -17,8 +17,9 @@ import { saveGeneratedTranscript } from '../library/transcript-history';
 import { FolderWatcher } from '../sync/folder-watcher';
 import { scanDesktopPlaud } from '../sync/desktop-plaud';
 import {
-  PlaudBindError, bindDirectPlaudIdentity, cancelDirectPlaud, unlinkDirectPlaud, directPlaudConfigured, importDirectPlaudRecording, readDirectPlaudRecordings,
+  PlaudBindError, bindDirectPlaudIdentity, cancelDirectPlaud, deleteDirectPlaudRecordings, unlinkDirectPlaud, directPlaudConfigured, importDirectPlaudRecording, readDirectPlaudRecordings,
 } from '../sync/plaud-direct';
+import { localCopyRefusal, markDeletedFromRecorder } from '../library/recorder-copies';
 import { readDeviceCredentials } from '../sync/plaud-device-auth';
 import { isBluetoothIdentifier } from '../sync/plaud-bridge';
 import { detectPlaudEnvironment, type PlaudEnvironment } from '../sync/plaud-environment';
@@ -126,6 +127,25 @@ app.get('/device-import/:id', c => {
   c.header('Cache-Control', 'no-store');
   return importJob?.id === c.req.param('id') ? c.json({ success: true, data: importJob })
     : c.json({ success: false, error: 'Import job unavailable; refresh the library before retrying' }, 404);
+});
+/**
+ * Deletes recordings from the recorder to free its storage. Only from this computer, only with explicit
+ * confirmation, and each only when OpenPlod holds a verified copy of that exact file.
+ */
+app.post('/device-delete', async c => {
+  if (!localOwner(c)) return c.json({ success: false, error: 'Delete recordings from the recorder on this computer.' }, 403);
+  const body = await c.req.json<{ sessionIds?: unknown; confirm?: boolean }>().catch(() => ({} as { sessionIds?: unknown; confirm?: boolean }));
+  const ids = Array.isArray(body.sessionIds) ? body.sessionIds : [];
+  if (body.confirm !== true || !ids.length || ids.length > 500 || !ids.every(id => Number.isSafeInteger(id))) return c.json({ success: false, error: 'Recordings and delete confirmation are required' }, 400);
+  if (importJob?.state === 'running') return c.json({ success: false, error: 'Wait for the Plaud import to finish' }, 409);
+  try {
+    const outcomes = await deleteDirectPlaudRecordings(ids as number[], async (serial, session) => localCopyRefusal(sqlite, serial, session));
+    const serial = (await loadIdentity()).serial;
+    for (const outcome of outcomes) if (outcome.deleted) await markDeletedFromRecorder(sqlite, serial, outcome.sessionId).catch(() => undefined);
+    return c.json({ success: true, data: outcomes });
+  } catch (error) {
+    return c.json({ success: false, error: error instanceof Error ? error.message : 'Delete from the recorder failed' }, 503);
+  }
 });
 app.post('/device-cancel', c => { cancelDirectPlaud(); return c.json({ success: true }); });
 // Recordings moving from the recorder right now, shown as rows in the library while they transfer.

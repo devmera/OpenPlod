@@ -8,6 +8,8 @@ export type ActionItem = {
   todoistId: string | null; sentAt: string | null
   /** Where the quote was said, in seconds. */
   start: number | null
+  /** When the task was ticked off, here or in Todoist. */
+  doneAt: string | null
 }
 export type MeetingTasks = { recordingId: string; title: string; recordedAt: string | null; tasks: ActionItem[] }
 
@@ -25,6 +27,7 @@ export const todoistApi = {
   projects: () => request<TodoistProject[]>('/projects'),
   all: () => request<{ connected: boolean; meetings: MeetingTasks[] }>('/tasks'),
   tasks: (recordingId: string) => request<{ connected: boolean; tasks: ActionItem[] }>(`/recordings/${encodeURIComponent(recordingId)}`),
+  setDone: (recordingId: string, key: string, done: boolean) => request<ActionItem>(`/recordings/${encodeURIComponent(recordingId)}/done`, 'POST', { key, done }),
   send: (recordingId: string, keys?: string[]) => request<SendResult[]>(`/recordings/${encodeURIComponent(recordingId)}`, 'POST', keys ? { keys } : {}),
 }
 

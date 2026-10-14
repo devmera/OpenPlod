@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AudioLines, Bluetooth, Check, CheckCircle2, Clock3, Download, FileAudio, FolderOpen, HardDrive, Loader2, Radio, RefreshCw, ShieldCheck, X } from "@/components/icons"
+import { AudioLines, Bluetooth, Check, CheckCircle2, Clock3, Download, FileAudio, FolderOpen, HardDrive, Loader2, Radio, RefreshCw, ShieldCheck, Trash2, X } from "@/components/icons"
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/icon-button'
 import { NoteDialog } from '@/components/NoteDialogs'
@@ -16,7 +16,7 @@ const sessionDate = (session: DeviceRecording) => new Date(session.sessionId * 1
 
 export function DesktopPlaud() {
   const [status, setStatus] = useState<PlaudStatus | null>(null)
-  const [phase, setPhase] = useState<'idle' | 'scanning' | 'listing' | 'downloading' | 'cancelling'>('idle')
+  const [phase, setPhase] = useState<'idle' | 'scanning' | 'listing' | 'downloading' | 'deleting' | 'cancelling'>('idle')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [scanned, setScanned] = useState<DeviceRecording[] | null>(null)
@@ -26,6 +26,7 @@ export function DesktopPlaud() {
   const presence = presenceLabel(sync)
   const [selected, setSelected] = useState<number[]>([])
   const [confirmation, setConfirmation] = useState<DeviceRecording[] | null>(null)
+  const [removal, setRemoval] = useState<DeviceRecording[] | null>(null)
   const [downloading, setDownloading] = useState<number | null>(null)
   const [checkedAt, setCheckedAt] = useState<Date | null>(null)
   const [stats, setStats] = useState<DashboardStats | null>(null)
@@ -38,6 +39,7 @@ export function DesktopPlaud() {
   const sessions = scanned ?? cached?.sessions ?? null
   const fromBackground = scanned === null && cached !== null
   const pending = sessions?.filter(session => !session.recordingId) || []
+  const imported = sessions?.filter(session => session.recordingId) || []
 
   const loadCached = useCallback(() => {
     void api.getCachedDeviceRecordings().then(value => { if (mounted.current) setCached(value) }).catch(() => undefined)
@@ -98,6 +100,27 @@ export function DesktopPlaud() {
       if (active.current === controller && !cancelling.current) { active.current = null; if (mounted.current) { setPhase('idle'); setDownloading(null) } }
     }
   }
+  // Frees the recorder's storage. The server deletes only recordings it holds a verified copy of and
+  // confirms each by listing the recorder again, so the list is updated from its answer.
+  const removeFromDevice = async () => {
+    if (active.current || !removal?.length) return
+    const items = removal
+    const controller = new AbortController(); active.current = controller
+    setRemoval(null); setPhase('deleting'); setError(''); setNotice('')
+    try {
+      const outcomes = await api.deleteDeviceRecordings(items.map(session => session.sessionId), controller.signal)
+      if (controller.signal.aborted) return
+      const gone = new Set(outcomes.filter(outcome => outcome.deleted).map(outcome => outcome.sessionId))
+      const kept = outcomes.filter(outcome => !outcome.deleted)
+      setScanned(current => current?.filter(item => !gone.has(item.sessionId)) ?? null)
+      setCached(current => current && { ...current, sessions: current.sessions.filter(item => !gone.has(item.sessionId)) })
+      setNotice(`${gone.size} recording${gone.size === 1 ? '' : 's'} deleted from the Note Pro${kept.length ? `; ${kept.length} kept: ${kept[0].reason}` : ''}`)
+    } catch (failure) {
+      if (mounted.current && !controller.signal.aborted) setError(failure instanceof Error ? failure.message : 'Delete from the Note Pro failed')
+    } finally {
+      if (active.current === controller && !cancelling.current) { active.current = null; if (mounted.current) setPhase('idle') }
+    }
+  }
   const cancel = async () => {
     if (cancelling.current) return
     cancelling.current = true; setPhase('cancelling')
@@ -109,7 +132,7 @@ export function DesktopPlaud() {
 
   const access = sessions !== null
   // Manual operations first, then what background sync currently knows about the recorder.
-  const statusLabel = phase === 'cancelling' ? 'Cancelling' : phase === 'scanning' ? 'Searching nearby' : phase === 'listing' ? 'Reading device' : phase === 'downloading' ? 'Importing audio'
+  const statusLabel = phase === 'cancelling' ? 'Cancelling' : phase === 'scanning' ? 'Searching nearby' : phase === 'listing' ? 'Reading device' : phase === 'downloading' ? 'Importing audio' : phase === 'deleting' ? 'Deleting from device'
     : presence?.live ? presence.label : scanned !== null ? 'Access verified' : presence ? presence.label
     : status?.deviceDetected ? 'Device detected' : status ? 'Not detected' : 'Not connected'
   const live = access && (scanned !== null || Boolean(presence?.live))
@@ -133,7 +156,8 @@ export function DesktopPlaud() {
           <dl><div><dt><Bluetooth />Bluetooth</dt><dd className="plaud-state" data-verified={live}><i />{statusLabel}</dd></div><div><dt><FileAudio />On device</dt><dd>{sessions === null ? 'Unknown' : `${sessions.length} recordings`}</dd></div><div><dt><ShieldCheck />Original audio</dt><dd>Kept on Plaud</dd></div></dl>
           <div className="plaud-connect-actions"><Button disabled={busy} onClick={() => void scan()}>{busy ? <Loader2 className="animate-spin" /> : status ? <RefreshCw /> : <Bluetooth />}{phase === 'scanning' ? 'Connecting' : phase === 'listing' ? 'Reading recordings' : status ? 'Refresh recordings' : 'Connect Note Pro'}</Button>
             {busy && <IconButton label="Cancel device operation" onClick={() => void cancel()}><X /></IconButton>}</div>
-          <div className="plaud-secondary-actions"><Button size="sm" variant="outline" disabled={busy || !pending.length} onClick={() => setConfirmation(pending)}><Download />Import new</Button><Button asChild variant="outline" size="sm"><Link to="/recordings"><FolderOpen />Open library</Link></Button></div>
+          <div className="plaud-secondary-actions"><Button size="sm" variant="outline" disabled={busy || !pending.length} onClick={() => setConfirmation(pending)}><Download />Import new</Button><Button asChild variant="outline" size="sm"><Link to="/recordings"><FolderOpen />Open library</Link></Button>
+            <Button size="sm" variant="outline" disabled={busy || !imported.length} onClick={() => setRemoval(imported)}><Trash2 />Free up space</Button></div>
         </div>
       </section>
       <section className="plaud-health" aria-label="Connection health"><header className="plaud-section-heading"><span className="plaud-section-icon"><ShieldCheck /></span><div><h2>Connection health</h2><p>{access ? 'Recording list verified on this computer' : 'Awaiting verified device access'}</p></div>{access && <CheckCircle2 className="plaud-positive" />}</header>
@@ -149,9 +173,10 @@ export function DesktopPlaud() {
               <input type="checkbox" aria-label={`Select recording ${session.sessionId}`} disabled={busy || !!session.recordingId} checked={selected.includes(session.sessionId)} onChange={event => setSelected(current => event.target.checked ? [...current, session.sessionId] : current.filter(id => id !== session.sessionId))} />
               <FileAudio /><div className="plaud-session-name"><strong>{sessionDate(session)}</strong><small>Session {session.sessionId}</small></div><span className="plaud-session-size">{Math.round(session.size / 1024)} KB</span>
               <span className="plaud-session-state" data-imported={!!session.recordingId}>{session.retentionState === 'trash' ? 'In Trash' : session.recordingId ? 'Imported' : 'New'}</span>
-              {session.recordingId ? <Button asChild variant="ghost" size="icon"><Link title="Open recording" aria-label={`Open recording ${session.sessionId}`} to={`/recording/${session.recordingId}`}><FolderOpen /></Link></Button> : <IconButton label={`Import recording ${session.sessionId}`} disabled={busy} onClick={() => setConfirmation([session])}>{downloading === session.sessionId ? <Loader2 className="animate-spin" /> : <Download />}</IconButton>}
+              {session.recordingId ? <><Button asChild variant="ghost" size="icon"><Link title="Open recording" aria-label={`Open recording ${session.sessionId}`} to={`/recording/${session.recordingId}`}><FolderOpen /></Link></Button><IconButton label={`Delete recording ${session.sessionId} from the Note Pro`} disabled={busy} onClick={() => setRemoval([session])}><Trash2 /></IconButton></> : <IconButton label={`Import recording ${session.sessionId}`} disabled={busy} onClick={() => setConfirmation([session])}>{downloading === session.sessionId ? <Loader2 className="animate-spin" /> : <Download />}</IconButton>}
             </div>)}</div>
           </>}
+        {phase === 'deleting' && <div className="plaud-import-progress" role="status"><Loader2 className="animate-spin" /><span>Deleting from the Note Pro</span></div>}
         {phase === 'downloading' && <div className="plaud-import-progress" role="status"><Loader2 className="animate-spin" /><span>Importing session {downloading}</span><Button variant="ghost" size="sm" onClick={() => void cancel()}><X />Cancel</Button></div>}
       </section>
       <div className="plaud-vault-column">
@@ -165,6 +190,10 @@ export function DesktopPlaud() {
     {confirmation && <NoteDialog title="Import from Plaud" description={`${confirmation.length} recording${confirmation.length === 1 ? '' : 's'}`} busy={false} onClose={() => setConfirmation(null)}>
       <p className="plaud-confirm-copy">Save the selected audio to your OpenPlod vault? Original recordings will stay on your Plaud.</p><ul className="plaud-confirm-list">{confirmation.map(session => <li key={session.sessionId}><FileAudio /><span>{sessionDate(session)}</span><small>{Math.round(session.size / 1024)} KB</small></li>)}</ul>
       <footer><Button variant="ghost" onClick={() => setConfirmation(null)}><X />Cancel</Button><Button onClick={() => void download()}><Download />Import {confirmation.length} recording{confirmation.length === 1 ? '' : 's'}</Button></footer>
+    </NoteDialog>}
+    {removal && <NoteDialog title="Delete from Note Pro" description={`${removal.length} recording${removal.length === 1 ? '' : 's'}`} busy={false} onClose={() => setRemoval(null)}>
+      <p className="plaud-confirm-copy">Delete these recordings from the recorder to free its storage? OpenPlod keeps its copies, including the original recorder files, and skips any recording it does not hold a complete copy of. This cannot be undone on the recorder.</p><ul className="plaud-confirm-list">{removal.map(session => <li key={session.sessionId}><FileAudio /><span>{sessionDate(session)}</span><small>{Math.round(session.size / 1024)} KB</small></li>)}</ul>
+      <footer><Button variant="ghost" onClick={() => setRemoval(null)}><X />Cancel</Button><Button variant="destructive" onClick={() => void removeFromDevice()}><Trash2 />Delete {removal.length} from Note Pro</Button></footer>
     </NoteDialog>}
   </div>
 }

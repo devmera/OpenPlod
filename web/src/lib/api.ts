@@ -429,7 +429,7 @@ interface RawTranscript {
   origin?: 'generated' | 'edited'
   currentVersionId?: string | null
   segments?: RawTranscriptSegment[] | string
-  summary?: { overview?: string; keyPoints?: string[]; topics?: string[] } | string
+  summary?: { overview?: string; notes?: string; keyPoints?: string[]; topics?: string[] } | string
   extractedTasks?: Array<string | { title?: string }>
 }
 
@@ -532,9 +532,10 @@ function mapRecording(r: RawRecording): Recording {
     hasTranscript: r.hasTranscript ?? Boolean(transcript?.fullText?.trim()),
     transcriptOrigin: transcript?.origin,
     transcriptVersionId: transcript?.currentVersionId,
-    summary: transcript?.summary ? (typeof transcript.summary === 'string' ? transcript.summary : transcript.summary.overview) : undefined,
+    summary: transcript?.summary ? (typeof transcript.summary === 'string' ? transcript.summary : [transcript.summary.overview, transcript.summary.notes].filter(Boolean).join('\n\n')) || undefined : undefined,
     // `typeof null` is 'object': a recording without a summary yet has `summary: null`.
-    summaryKeyPoints: transcript?.summary && typeof transcript.summary === 'object' ? transcript.summary.keyPoints?.filter(Boolean) : undefined,
+    // Structured notes already carry the key points; listing them again would repeat the notes.
+    summaryKeyPoints: transcript?.summary && typeof transcript.summary === 'object' && !transcript.summary.notes ? transcript.summary.keyPoints?.filter(Boolean) : undefined,
     summaryTopics: transcript?.summary && typeof transcript.summary === 'object' ? transcript.summary.topics?.filter(Boolean) : undefined,
     actionItems: transcript?.extractedTasks
       ?.map(item => typeof item === 'string' ? item : item.title)

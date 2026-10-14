@@ -43,14 +43,14 @@ test('the model sees speaker turns, with anonymous voices marked as unidentified
 
 test('a fenced reply with stray fields and one unreadable task still yields the summary and the good tasks', () => {
   const reply = 'Here is the analysis:\n```json\n' + JSON.stringify({
-    summary: { overview: 'Migration plan.', keyPoints: ['Envoy'], decisions: ['extra field'], participants: 'Thor' },
+    summary: { overview: 'Migration plan.', notes: '### Envoy\n- Proxy in front ', keyPoints: ['Envoy'], decisions: ['extra field'], participants: 'Thor' },
     extractedTasks: [
       { title: 'Set up Envoy', owner: 'Joakim', priority: 'urgent', due: { kind: 'someday' }, context: 'I will set up Envoy.' },
       { title: 'No quote' },
     ],
   }) + '\n```';
   const parsed = parseAnalysis(reply);
-  expect(parsed.summary).toEqual({ overview: 'Migration plan.', keyPoints: ['Envoy'], participants: undefined, topics: undefined });
+  expect(parsed.summary).toEqual({ overview: 'Migration plan.', notes: '### Envoy\n- Proxy in front', keyPoints: ['Envoy'], participants: undefined, topics: undefined });
   expect(parsed.extractedTasks).toEqual([{ title: 'Set up Envoy', owner: 'Joakim', priority: null, due: null, context: 'I will set up Envoy.' }]);
   expect(() => parseAnalysis('Sorry, I cannot help.')).toThrow('not valid JSON');
   expect(() => parseAnalysis('{"summary":{}}')).toThrow('without a summary overview');

@@ -615,3 +615,4 @@ li.done .action-item-text > span:first-child { color: var(--muted-foreground); t
 .tasks-meeting h3 a:hover { text-decoration: underline; }
 .tasks-meeting h3 small { color: var(--muted-foreground); font-size: 12px; font-weight: 400; }
 .task-meeting-link:hover { color: var(--foreground); text-decoration: underline; }
+.document-tasks { padding: 24px 28px; font-size: 13px; }

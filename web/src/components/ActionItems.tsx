@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
-import { todoistApi, describeSend, formatDue, type ActionItem, type TodoistSettings } from '@/lib/todoist'
+import { todoistApi, describeSend, formatDue, clock, type ActionItem, type TodoistSettings } from '@/lib/todoist'
 import { Button } from '@/components/ui/button'
-import { AlignLeft, Check, Clock3, ListChecks, Loader2, RefreshCw, Send, UserRound } from '@/components/icons'
+import { AlignLeft, Check, Clock3, ListChecks, Loader2, Play, RefreshCw, Send, UserRound } from '@/components/icons'
 
 type Status = { settings: TodoistSettings; lastRun: { at: string; error?: string } | null }
 type Group = { owner: string; mine: boolean; items: ActionItem[] }
@@ -28,7 +28,7 @@ const time = (iso: string) => new Date(iso).toLocaleString(undefined, { month: '
  * grouped by owner with the Todoist connection and each task's sync state; otherwise a flat list.
  * `version` reloads the list after a new summary.
  */
-export function ActionItems({ recordingId, version, full = false, summarized = true, error }: { recordingId: string; version?: string | null; full?: boolean; summarized?: boolean; error?: string | null }) {
+export function ActionItems({ recordingId, version, full = false, summarized = true, error, onSeek }: { recordingId: string; version?: string | null; full?: boolean; summarized?: boolean; error?: string | null; onSeek?: (seconds: number) => void }) {
   const [items, setItems] = useState<ActionItem[] | null>(null), [status, setStatus] = useState<Status | null>(null)
   const [busy, setBusy] = useState<string | null>(null), [notice, setNotice] = useState('')
   const load = useCallback(async () => {
@@ -57,7 +57,9 @@ export function ActionItems({ recordingId, version, full = false, summarized = t
     {notice && <small role="status">{notice}</small>}
   </div> : null
   const unsentMine = items.filter(item => item.mine && !item.sentAt)
-  const sent = items.filter(item => item.sentAt).length
+  // Only your tasks go to Todoist on their own, so progress counts yours; others are sent by hand.
+  const mine = items.filter(item => item.mine), mineSent = mine.filter(item => item.sentAt).length
+  const othersSent = items.filter(item => !item.mine && item.sentAt).length
 
   const row = (item: ActionItem) => <li key={item.key + item.title} className={item.mine ? 'mine' : undefined}>
     <span className="action-item-text">
@@ -65,7 +67,9 @@ export function ActionItems({ recordingId, version, full = false, summarized = t
       <span className="action-item-meta">
         {!full && (item.mine ? <span className="action-item-owner"><UserRound />You</span> : item.assignee && <span>{item.assignee}</span>)}
         {item.dueDate && <span title={item.dueEvidence ? `“${item.dueEvidence}”` : undefined}><Clock3 />{formatDue(item.dueDate)}</span>}
-        {full && <span className="action-item-quote" title={item.context}>“{item.context}”</span>}
+        {full && (onSeek && item.start !== null
+          ? <button type="button" className="action-item-quote" title={`Play from ${clock(item.start)}: ${item.context}`} onClick={() => onSeek(item.start!)}><Play />{clock(item.start)} · “{item.context}”</button>
+          : <span className="action-item-quote" title={item.context}>“{item.context}”</span>)}
       </span>
     </span>
     {connected && (item.sentAt
@@ -89,7 +93,7 @@ export function ActionItems({ recordingId, version, full = false, summarized = t
       <span className="todoist-dot" data-state={!connected ? 'off' : status?.lastRun?.error ? 'error' : 'ok'} />
       <span className="todoist-status-text">
         {!connected ? <>Todoist not connected · <Link to="/settings">Connect in Settings</Link></>
-          : <>Todoist · {sent} of {items.length} sent{auto ? ' · your tasks are sent automatically' : ' · automatic sending off'}
+          : <>Todoist · {mine.length ? `${mineSent} of your ${mine.length} task${mine.length === 1 ? '' : 's'} sent` : 'none of these tasks are yours'}{othersSent ? ` · ${othersSent} other${othersSent === 1 ? '' : 's'} added by hand` : ''}{auto ? ' · yours are sent automatically' : ' · automatic sending off'}
             {status?.lastRun && <> · {status.lastRun.error ? `last automatic send failed: ${status.lastRun.error}` : `last automatic send ${time(status.lastRun.at)}`}</>}</>}
       </span>
       <Button variant="ghost" size="icon" aria-label="Refresh tasks" title="Refresh" onClick={() => void load()}><RefreshCw /></Button>

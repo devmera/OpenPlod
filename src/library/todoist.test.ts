@@ -1,6 +1,6 @@
 import { beforeEach, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { TodoistPublisher, evidenceOverlaps, taskKey, type Command, type TodoistApi } from './todoist';
+import { TodoistPublisher, evidenceOverlaps, quoteStart, taskKey, type Command, type TodoistApi } from './todoist';
 
 let sqlite: Database, sent: Command[][], publisher: TodoistPublisher, reject: string | null;
 const fake: TodoistApi = {
@@ -18,7 +18,7 @@ beforeEach(() => {
   sqlite = new Database(':memory:');
   sqlite.exec(`CREATE TABLE user_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT);
     CREATE TABLE recordings (id TEXT PRIMARY KEY, original_filename TEXT, recorded_at TEXT, uploaded_at TEXT, retention_state TEXT NOT NULL DEFAULT 'active', status TEXT NOT NULL DEFAULT 'complete');
-    CREATE TABLE transcripts (id TEXT PRIMARY KEY, recording_id TEXT NOT NULL UNIQUE, extracted_tasks TEXT, analyzed_at TEXT);
+    CREATE TABLE transcripts (id TEXT PRIMARY KEY, recording_id TEXT NOT NULL UNIQUE, extracted_tasks TEXT, analyzed_at TEXT, segments TEXT);
     INSERT INTO recordings (id, original_filename, recorded_at) VALUES ('r1', 'Budget-sync.m4a', '2026-10-13T13:26:00Z');
     INSERT INTO transcripts (id, recording_id) VALUES ('t1', 'r1');`);
   sent = []; reject = null;
@@ -68,4 +68,16 @@ test('turning automatic sending on does not send the back catalogue', async () =
 test('evidence overlap needs a substantial shared passage', () => {
   expect(evidenceOverlaps('I will send the board report to Anna', 'Okay. I will send the board report to Anna on Friday.')).toBe(true);
   expect(evidenceOverlaps('send it', 'I will send it tomorrow')).toBe(false);
+});
+
+test('a task knows where its quote was said, and every meeting\'s tasks can be listed together', () => {
+  const segments = [{ start: 0, text: 'Welcome everyone.' }, { start: 4, text: 'Okay so the plan.' }, { start: 9, text: 'I will send the board report' }, { start: 12, text: 'to Anna on Friday.' }, { start: 15, text: 'Great.' }];
+  expect(quoteStart(mine.context, segments)).toBe(9);
+  expect(quoteStart('Something nobody said at all here', segments)).toBeNull();
+  sqlite.query('UPDATE transcripts SET segments = ? WHERE id = ?').run(JSON.stringify(segments), 't1');
+  summarize([mine, theirs]);
+  expect(publisher.tasks('r1')[0].start).toBe(9);
+  expect(publisher.allTasks()).toEqual([{ recordingId: 'r1', title: 'Budget sync', recordedAt: '2026-10-13T13:26:00Z', tasks: publisher.tasks('r1') }]);
+  sqlite.query("UPDATE recordings SET retention_state = 'trash'").run();
+  expect(publisher.allTasks()).toEqual([]);
 });

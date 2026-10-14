@@ -512,7 +512,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
 
           <article className="document-surface">
             {documentMode === 'summary' ? (
-              hasSummary ? (
+              hasSummary && !processing ? (
                 <div className="summary-document markdown-document" ref={summaryView}>
                   {summaryMarkdown}
                   {!!recording.summaryKeyPoints?.length && <><h2>Key points</h2><ul>{recording.summaryKeyPoints.map((point, index) => <li key={index}>{highlightText(point, query)}</li>)}</ul></>}

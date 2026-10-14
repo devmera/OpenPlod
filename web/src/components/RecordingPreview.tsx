@@ -572,12 +572,13 @@ export function RecordingPreview({
           ))}
         {tab === "AI Summary" && (
           <div className="markdown-document">
-            {recording?.summary ? (
+            {/* A summary being rewritten is replaced by the progress, not shown stale beside it. */}
+            {processing ? (
+              <ProcessingState processing={processing} compact />
+            ) : recording?.summary ? (
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {recording.summary}
               </ReactMarkdown>
-            ) : processing ? (
-              <ProcessingState processing={processing} compact />
             ) : (
               <div className="preview-empty">
                 <AlignLeft />

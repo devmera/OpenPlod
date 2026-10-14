@@ -48,8 +48,8 @@ import {
 } from "@/lib/document-export";
 import { formatDuration } from "@/lib/utils";
 
-const contentTabs = ["Transcript", "AI Summary", "Notes", "Chapters", "Export"];
-const tabIcons = [FileText, AlignLeft, NotebookPen, ListTree, Download];
+const contentTabs = ["Transcript", "AI Summary", "Tasks", "Notes", "Chapters", "Export"];
+const tabIcons = [FileText, AlignLeft, ListChecks, NotebookPen, ListTree, Download];
 
 export function RecordingPreview({
   id,
@@ -546,7 +546,6 @@ export function RecordingPreview({
                 {recording.summary}
               </ReactMarkdown>
             ) : null}
-            {recording?.summary && <ActionItems recordingId={id} version={recording.actionItems?.join("\n")} />}
             {recording?.summary ? null : (
               <div className="preview-empty">
                 <AlignLeft />
@@ -563,6 +562,7 @@ export function RecordingPreview({
             )}
           </div>
         )}
+        {tab === "Tasks" && <ActionItems full recordingId={id} version={recording?.actionItems?.join("\n")} />}
         {tab === "Notes" && (
           <div className="preview-notes">
             <label htmlFor="preview-notes">Recording notes</label>

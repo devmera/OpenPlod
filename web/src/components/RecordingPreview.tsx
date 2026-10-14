@@ -558,9 +558,16 @@ export function RecordingPreview({
             {processing ? (
               <ProcessingState processing={processing} compact />
             ) : recording?.summary ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {recording.summary}
-              </ReactMarkdown>
+              <>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {recording.summary}
+                </ReactMarkdown>
+                <div className="preview-summary-again">
+                  <Button variant="ghost" size="sm" onClick={() => void summarize()}>
+                    <RefreshCw />Summarize again
+                  </Button>
+                </div>
+              </>
             ) : (
               <div className="preview-empty">
                 <AlignLeft />

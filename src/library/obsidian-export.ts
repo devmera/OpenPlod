@@ -30,7 +30,7 @@ interface Segment { start?: number; end?: number; text: string; speaker?: number
 export interface NoteSource {
   id: string; title: string; recordedAt: string; durationSeconds: number | null; sourceProvider: string | null; recordingType: string;
   segments: Segment[]; fullText: string;
-  summary: { overview?: string; keyPoints?: string[]; participants?: string[]; topics?: string[] } | null;
+  summary: { overview?: string; notes?: string; keyPoints?: string[]; participants?: string[]; topics?: string[] } | null;
   tasks: { title: string; assignee?: string; dueDate?: string }[];
 }
 
@@ -49,6 +49,7 @@ const localDateTime = (iso: string) => new Date(iso).toLocaleString('sv-SE', { y
 /** The managed block: summary, key points, action items, then the transcript grouped by speaker turn. */
 export function renderBlock(note: NoteSource): string {
   const lines = [START, '## Summary', '', note.summary?.overview?.trim() || '_No summary yet._', ''];
+  if (note.summary?.notes?.trim()) lines.push(note.summary.notes.trim(), '');
   if (note.summary?.keyPoints?.length) lines.push('### Key points', '', ...note.summary.keyPoints.map(point => `- ${point}`), '');
   const seen = new Set<string>();
   const tasks = note.tasks.filter(task => !seen.has(task.title.toLowerCase()) && seen.add(task.title.toLowerCase()));

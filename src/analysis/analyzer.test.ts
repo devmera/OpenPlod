@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { groundTasks, resolveDue, speakerTranscript } from './analyzer';
+import { groundTasks, parseAnalysis, resolveDue, speakerTranscript } from './analyzer';
 
 const transcript = 'We need a firewall change. Anna will open the SR for the new rules by Friday. Then security approves it.';
 
@@ -39,4 +39,19 @@ test('the model sees speaker turns, with anonymous voices marked as unidentified
   expect(speakerTranscript([{ text: 'Hej.', speaker: 'Joakim' }, { text: 'Jag fixar det.', speaker: 'Joakim' }, { text: 'Bra.', speaker: 1 }], 'x'))
     .toBe('Joakim: Hej. Jag fixar det.\nSpeaker 2 (unidentified): Bra.');
   expect(speakerTranscript([{ text: 'No labels.' }], 'No labels.')).toBe('No labels.');
+});
+
+test('a fenced reply with stray fields and one unreadable task still yields the summary and the good tasks', () => {
+  const reply = 'Here is the analysis:\n```json\n' + JSON.stringify({
+    summary: { overview: 'Migration plan.', keyPoints: ['Envoy'], decisions: ['extra field'], participants: 'Thor' },
+    extractedTasks: [
+      { title: 'Set up Envoy', owner: 'Joakim', priority: 'urgent', due: { kind: 'someday' }, context: 'I will set up Envoy.' },
+      { title: 'No quote' },
+    ],
+  }) + '\n```';
+  const parsed = parseAnalysis(reply);
+  expect(parsed.summary).toEqual({ overview: 'Migration plan.', keyPoints: ['Envoy'], participants: undefined, topics: undefined });
+  expect(parsed.extractedTasks).toEqual([{ title: 'Set up Envoy', owner: 'Joakim', priority: null, due: null, context: 'I will set up Envoy.' }]);
+  expect(() => parseAnalysis('Sorry, I cannot help.')).toThrow('not valid JSON');
+  expect(() => parseAnalysis('{"summary":{}}')).toThrow('without a summary overview');
 });

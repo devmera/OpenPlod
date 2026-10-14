@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { api, type Settings } from '@/lib/api'
 import { getRuntime } from '@/lib/runtime'
 import { buildInfo, buildLabel } from '@/lib/build-info'
+import { TodoistPanel } from '@/components/TodoistPanel'
 import { AiSettingsPanel } from '@/components/AiSettingsPanel'
 
 function Toggle({ checked, onChange, label, description }: { checked: boolean; onChange: (v: boolean) => void; label: string; description: string }) {
@@ -121,6 +122,8 @@ export function SettingsPage() {
       </details>
 
       <AiSettingsPanel />
+
+      <TodoistPanel />
 
       {/* Sync */}
       <Card>

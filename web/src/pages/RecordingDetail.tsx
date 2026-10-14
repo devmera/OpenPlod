@@ -41,6 +41,7 @@ import { activeWordIndex, followedSegmentIndex, hasWordTiming } from '@/lib/tran
 import { TranscribeDialog } from '@/components/TranscribeDialog'
 import { RecordingBookmarks } from '@/components/RecordingBookmarks'
 import { SegmentEditor } from '@/components/SegmentEditor'
+import { ActionItems } from '@/components/ActionItems'
 import { api, speakerLabel, type Recording, type TranscriptSegment, type TranscriptVersion } from '@/lib/api'
 import { formatDuration } from '@/lib/utils'
 import { exportDocument, exportOriginalAudio, recordingMarkdown, safeDocumentName as safeName } from '@/lib/document-export'
@@ -509,6 +510,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
             {recording.summary ? <div className="inspector-summary">{summaryMarkdown}</div> : (
               <div className="inspector-empty"><p>No summary yet.</p><Button variant="outline" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <AlignLeft />}Generate</Button></div>
             )}
+            <ActionItems recordingId={recording.id} version={recording.actionItems?.join('\n')} />
           </section>
 
           <section>

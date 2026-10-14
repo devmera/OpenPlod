@@ -534,3 +534,19 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .device-desktop > svg { width: 36px; height: 36px; margin-bottom: 16px; color: var(--primary); }
 .device-desktop p { color: var(--muted-foreground); margin-block: 12px 24px; max-width: 48ch; }
 @media (max-width: 640px) { .device-page { padding: 20px 16px; } .device-recording-row button { min-width: 44px; min-height: 44px; } }
+
+/* Action items with Todoist sending */
+.action-items { margin-top: 14px; font-size: 12px; }
+.action-items-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.action-items-heading h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.action-items ul { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.action-items li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.action-items li:last-child { border-bottom: 0; }
+.action-item-text { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.action-item-meta { display: flex; flex-wrap: wrap; gap: 10px; color: var(--muted-foreground); font-size: 11px; }
+.action-item-meta span, .action-item-sent { display: inline-flex; align-items: center; gap: 4px; }
+.action-item-meta svg, .action-item-sent svg { width: 12px; height: 12px; }
+.action-items li.mine .action-item-owner { color: var(--primary); }
+.action-item-sent { flex-shrink: 0; color: var(--muted-foreground); font-size: 11px; }
+.action-items li button { flex-shrink: 0; gap: 4px; }
+.action-items-notice { margin: 6px 0 0; color: var(--muted-foreground); font-size: 11px; }

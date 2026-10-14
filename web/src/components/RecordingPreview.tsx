@@ -35,6 +35,7 @@ import { IconButton } from './ui/icon-button';
 import { PlaybackSpeedMenu } from './PlaybackSpeedMenu';
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Button } from "./ui/button";
+import { ActionItems } from '@/components/ActionItems';
 import { RecordingBookmarks } from "./RecordingBookmarks";
 import { SaveTranscriptDialog } from "./NoteDialogs";
 import { api, type Recording } from "@/lib/api";
@@ -544,7 +545,9 @@ export function RecordingPreview({
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {recording.summary}
               </ReactMarkdown>
-            ) : (
+            ) : null}
+            {recording?.summary && <ActionItems recordingId={id} version={recording.actionItems?.join("\n")} />}
+            {recording?.summary ? null : (
               <div className="preview-empty">
                 <AlignLeft />
                 <p>No saved summary yet.</p>

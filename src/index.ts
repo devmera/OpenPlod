@@ -29,6 +29,8 @@ import { configuredSyncPath, purgeExpiredTrash } from './library/recording-libra
 import { saveGeneratedTranscript } from './library/transcript-history';
 import { forwardRecordingWithRetry } from './library/forwarding';
 import { createAiSettingsApi } from './api/ai-settings';
+import { createTodoistApi } from './api/todoist';
+import { TodoistPublisher } from './library/todoist';
 import { createJobsApi } from './api/jobs';
 import { aiConfigSchema, readAiConfig, readSettings, assertPrivacy } from './ai/config';
 import packageInfo from '../package.json';
@@ -165,6 +167,10 @@ app.route('/api/mobile', mobileApi);
 app.route('/api/transcripts', transcriptsApi);
 const organizer = new OrganizerStore(sqlite);
 app.route('/api/v1/jobs', createJobsApi(jobQueue, sqlite));
+const todoist = new TodoistPublisher(sqlite);
+app.route('/api/todoist', createTodoistApi(todoist));
+// Automatic sending: your action items reach Todoist shortly after a summary is saved.
+setInterval(() => void todoist.run().catch(error => console.error('[Todoist] Sync failed:', error)), 30000).unref();
 app.route('/api/v1', createOrganizerApi(organizer));
 app.route('/api/ai', createRecordingAiApi(new RecordingAi(organizer)));
 app.route('/api/ai-settings', createAiSettingsApi(sqlite));

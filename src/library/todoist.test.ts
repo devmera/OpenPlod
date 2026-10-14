@@ -2,12 +2,13 @@ import { beforeEach, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { TodoistPublisher, evidenceOverlaps, quoteStart, taskKey, type Command, type TodoistApi } from './todoist';
 
-let sqlite: Database, sent: Command[][], publisher: TodoistPublisher, reject: string | null;
+let sqlite: Database, sent: Command[][], publisher: TodoistPublisher, reject: string | null, open = new Set<string>();
 const fake: TodoistApi = {
   async sync(commands) {
     sent.push(commands);
-    return { status: Object.fromEntries(commands.map(command => [command.uuid, reject && command.args.content === reject ? { error: 'Invalid' } : 'ok'])), tempIds: Object.fromEntries(commands.map((command, index) => [command.temp_id ?? '', `t${sent.length}-${index}`])) };
+    return { status: Object.fromEntries(commands.map(command => [command.uuid, reject && (command.args.content === reject || command.type === reject) ? { error: 'Invalid' } : 'ok'])), tempIds: Object.fromEntries(commands.map((command, index) => [command.temp_id ?? '', `t${sent.length}-${index}`])) };
   },
+  async openTaskIds() { return open; },
   async read() { return { projects: [{ id: 'inbox', name: 'Inbox', inbox: true }, { id: 'p1', name: 'Work', inbox: false }], labels: sent.length ? ['openplod'] : [] }; },
 };
 const items = () => sent.flat().filter(command => command.type === 'item_add');
@@ -21,7 +22,7 @@ beforeEach(() => {
     CREATE TABLE transcripts (id TEXT PRIMARY KEY, recording_id TEXT NOT NULL UNIQUE, extracted_tasks TEXT, analyzed_at TEXT, segments TEXT);
     INSERT INTO recordings (id, original_filename, recorded_at) VALUES ('r1', 'Budget-sync.m4a', '2026-10-13T13:26:00Z');
     INSERT INTO transcripts (id, recording_id) VALUES ('t1', 'r1');`);
-  sent = []; reject = null;
+  sent = []; reject = null; open = new Set();
   publisher = new TodoistPublisher(sqlite, () => fake);
 });
 
@@ -80,4 +81,40 @@ test('a task knows where its quote was said, and every meeting\'s tasks can be l
   expect(publisher.allTasks()).toEqual([{ recordingId: 'r1', title: 'Budget sync', recordedAt: '2026-10-13T13:26:00Z', tasks: publisher.tasks('r1') }]);
   sqlite.query("UPDATE recordings SET retention_state = 'trash'").run();
   expect(publisher.allTasks()).toEqual([]);
+});
+
+test('ticking a task off completes it in Todoist too; a refusal there changes nothing here', async () => {
+  await publisher.saveSettings({ token: 'secret', projectId: '', auto: false, principal: '' });
+  summarize([mine, theirs]);
+  const [first, second] = publisher.tasks('r1');
+  await publisher.send('r1', [first.key]);
+  const todoistId = publisher.tasks('r1')[0].todoistId!;
+  reject = 'item_close';
+  await expect(publisher.setDone('r1', first.key, true)).rejects.toThrow('could not complete');
+  expect(publisher.tasks('r1')[0].doneAt).toBeNull();
+  reject = null;
+  expect((await publisher.setDone('r1', first.key, true)).doneAt).toEqual(expect.any(String));
+  expect(sent.at(-1)![0]).toMatchObject({ type: 'item_close', args: { id: todoistId } });
+  expect((await publisher.setDone('r1', first.key, false)).doneAt).toBeNull();
+  expect(sent.at(-1)![0]).toMatchObject({ type: 'item_uncomplete', args: { id: todoistId } });
+  // A task never sent is ticked off here only.
+  const before = sent.length;
+  expect((await publisher.setDone('r1', second.key, true)).doneAt).toEqual(expect.any(String));
+  expect(sent).toHaveLength(before);
+  // A new summary quoting the same promise keeps it ticked.
+  summarize([mine, { ...theirs, title: 'Reserve the room', context: 'Bo books the room' }]);
+  expect(publisher.tasks('r1')[1].doneAt).toEqual(expect.any(String));
+});
+
+test('completion in Todoist comes back: done when no longer open there, undone when reopened', async () => {
+  await publisher.saveSettings({ token: 'secret', projectId: '', auto: false, principal: '' });
+  summarize([mine]);
+  await publisher.send('r1');
+  const id = publisher.tasks('r1')[0].todoistId!;
+  await publisher.pullCompletion();
+  expect(publisher.tasks('r1')[0].doneAt).toEqual(expect.any(String));
+  open = new Set([id]);
+  const fresh = new TodoistPublisher(sqlite, () => fake);
+  await fresh.pullCompletion();
+  expect(fresh.tasks('r1')[0].doneAt).toBeNull();
 });

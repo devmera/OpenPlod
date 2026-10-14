@@ -693,3 +693,22 @@ a.action-item-quote { display: -webkit-box; overflow: hidden; -webkit-line-clamp
 a.action-item-quote:hover { color: var(--foreground); }
 a.action-item-quote svg { display: inline; width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; }
 @media (max-width: 640px) { .tasks-page { padding: 24px 16px; } }
+
+/* Todoist-style round task checkbox */
+.task-check { display: grid; width: 18px; height: 18px; flex-shrink: 0; place-items: center; align-self: flex-start; margin-top: 2px; border: 1.5px solid var(--muted-foreground); border-radius: 50%; background: transparent; color: var(--background); }
+.task-check[data-mine] { border-color: var(--primary); }
+.task-check:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 15%, transparent); }
+.task-check[aria-checked='true'] { border-color: var(--muted-foreground); background: var(--muted-foreground); }
+.task-check svg { width: 11px; height: 11px; stroke-width: 3; }
+.task-check .animate-spin { color: var(--muted-foreground); }
+li.done .action-item-text > span:first-child { color: var(--muted-foreground); text-decoration: line-through; }
+.action-items li, .tasks-meeting li { justify-content: flex-start; }
+.action-items li > .action-item-text, .tasks-meeting li > .action-item-text { flex: 1; }
+.tasks-show-done { display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); font-size: 12px; }
+.tasks-mine { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.tasks-mine h2 svg { width: 14px; height: 14px; color: var(--primary); }
+.tasks-section-title { margin: 8px 0 -6px; font-size: 14px; font-weight: 600; }
+.tasks-meeting h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+.tasks-meeting h3 a:hover { text-decoration: underline; }
+.tasks-meeting h3 small { color: var(--muted-foreground); font-size: 12px; font-weight: 400; }
+.task-meeting-link:hover { color: var(--foreground); text-decoration: underline; }

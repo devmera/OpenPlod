@@ -42,6 +42,8 @@ export interface TodoistProject { id: string; name: string; inbox: boolean }
 export interface TodoistApi {
   sync(commands: Command[]): Promise<{ status: Record<string, Status>; tempIds: Record<string, string> }>;
   read(): Promise<{ projects: TodoistProject[]; labels: string[] }>;
+  /** Ids of the user's tasks that are still open; a task missing here was completed or deleted. */
+  openTaskIds(): Promise<Set<string>>;
 }
 
 export class TodoistClient implements TodoistApi {
@@ -66,6 +68,10 @@ export class TodoistClient implements TodoistApi {
       .filter(project => !project.is_deleted && !project.is_archived).map(project => ({ id: project.id, name: project.name, inbox: Boolean(project.inbox_project) }));
     return { projects, labels: ((body.labels ?? []) as { name: string; is_deleted?: boolean }[]).filter(label => !label.is_deleted).map(label => label.name) };
   }
+  async openTaskIds() {
+    const body = await this.post({ sync_token: '*', resource_types: '["items"]' });
+    return new Set(((body.items ?? []) as { id: string; checked?: boolean; is_deleted?: boolean }[]).filter(item => !item.checked && !item.is_deleted).map(item => item.id));
+  }
 }
 
 const statusError = (status: Status | undefined) => status === undefined ? 'Todoist did not answer for this task.' : status === 'ok' ? '' : status.error || status.error_tag || 'Todoist rejected the task.';
@@ -74,7 +80,7 @@ export interface TodoistSettings { connected: boolean; projectId: string; auto: 
 export interface SettingsInput { token?: string; projectId: string; auto: boolean; principal: string }
 interface StoredTask { title: string; description?: string; assignee?: string; dueDate?: string; dueEvidence?: string; mine?: boolean; context: string }
 /** `start` is where the quote behind the task begins in the audio, in seconds, when it can be found. */
-export interface RecordingTask extends StoredTask { key: string; todoistId: string | null; sentAt: string | null; start: number | null }
+export interface RecordingTask extends StoredTask { key: string; todoistId: string | null; sentAt: string | null; start: number | null; doneAt: string | null }
 export interface MeetingTasks { recordingId: string; title: string; recordedAt: string | null; tasks: RecordingTask[] }
 
 const words = (text: string) => text.toLocaleLowerCase().normalize('NFKC').match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -124,6 +130,8 @@ export class TodoistPublisher {
     sqlite.exec(`CREATE TABLE IF NOT EXISTS todoist_tasks (task_key TEXT PRIMARY KEY, recording_id TEXT NOT NULL, evidence TEXT NOT NULL,
       title TEXT NOT NULL, todoist_id TEXT, sent_at TEXT NOT NULL)`);
     sqlite.exec('CREATE INDEX IF NOT EXISTS idx_todoist_tasks_recording ON todoist_tasks(recording_id)');
+    // Ticked-off tasks, keyed like sent ones so a new summary of the same meeting keeps them ticked.
+    sqlite.exec('CREATE TABLE IF NOT EXISTS task_done (task_key TEXT PRIMARY KEY, recording_id TEXT NOT NULL, evidence TEXT NOT NULL, done_at TEXT NOT NULL)');
   }
 
   private values(): Record<string, string> {
@@ -191,11 +199,53 @@ export class TodoistPublisher {
     if (!Array.isArray(segments)) segments = [];
     const sent = this.sqlite.query('SELECT task_key AS key, evidence, todoist_id AS todoistId, sent_at AS sentAt FROM todoist_tasks WHERE recording_id = ?').all(recordingId) as
       { key: string; evidence: string; todoistId: string | null; sentAt: string }[];
+    const done = this.sqlite.query('SELECT task_key AS key, evidence, done_at AS doneAt FROM task_done WHERE recording_id = ?').all(recordingId) as
+      { key: string; evidence: string; doneAt: string }[];
+    const find = <T extends { key: string; evidence: string }>(rows: T[], key: string, context: string) => rows.find(item => item.key === key) ?? rows.find(item => evidenceOverlaps(item.evidence, context));
     return stored.map(task => {
-      const key = taskKey(recordingId, task.context);
-      const match = sent.find(item => item.key === key) ?? sent.find(item => evidenceOverlaps(item.evidence, task.context));
-      return { ...task, key, todoistId: match?.todoistId ?? null, sentAt: match?.sentAt ?? null, start: quoteStart(task.context, segments) };
+      const key = taskKey(recordingId, task.context), match = find(sent, key, task.context);
+      return { ...task, key, todoistId: match?.todoistId ?? null, sentAt: match?.sentAt ?? null, start: quoteStart(task.context, segments), doneAt: find(done, key, task.context)?.doneAt ?? null };
     });
+  }
+
+  /**
+   * Ticks a task off, or back on. A task in Todoist is completed or reopened there first, and nothing
+   * changes here if Todoist refuses.
+   */
+  async setDone(recordingId: string, key: string, done: boolean): Promise<RecordingTask> {
+    const task = this.tasks(recordingId).find(item => item.key === key);
+    if (!task) throw new Error('Task not found. The recording may have been summarized again.');
+    if (task.todoistId && this.settings().connected) {
+      const { status } = await this.api().sync([{ type: done ? 'item_close' : 'item_uncomplete', uuid: randomUUID(), args: { id: task.todoistId } }]);
+      const result = Object.values(status)[0];
+      if (result !== 'ok') throw new Error(`Todoist could not ${done ? 'complete' : 'reopen'} the task: ${statusError(result)}`);
+    }
+    this.mark(recordingId, task, done);
+    return this.tasks(recordingId).find(item => item.key === key)!;
+  }
+
+  private mark(recordingId: string, task: RecordingTask, done: boolean) {
+    // Clears every row standing for this task, including one keyed on an earlier summary's quote.
+    for (const row of this.sqlite.query('SELECT task_key AS key, evidence FROM task_done WHERE recording_id = ?').all(recordingId) as { key: string; evidence: string }[])
+      if (row.key === task.key || evidenceOverlaps(row.evidence, task.context)) this.sqlite.query('DELETE FROM task_done WHERE task_key = ?').run(row.key);
+    if (done) this.sqlite.query('INSERT INTO task_done(task_key, recording_id, evidence, done_at) VALUES(?, ?, ?, ?)').run(task.key, recordingId, task.context, new Date().toISOString());
+  }
+
+  private pulledAt = 0;
+  /**
+   * Takes completion from Todoist for tasks sent there: ticked off when Todoist no longer lists the task
+   * as open, unticked when it was reopened. At most every 30 seconds; failures leave things as they are.
+   */
+  async pullCompletion(): Promise<void> {
+    if (!this.settings().connected || Date.now() - this.pulledAt < 30000) return;
+    this.pulledAt = Date.now();
+    let open: Set<string>;
+    try { open = await this.api().openTaskIds(); } catch { return; }
+    for (const meeting of this.allTasks()) for (const task of meeting.tasks) {
+      if (!task.todoistId) continue;
+      const doneThere = !open.has(task.todoistId);
+      if (doneThere !== Boolean(task.doneAt)) this.mark(meeting.recordingId, task, doneThere);
+    }
   }
 
   /** Send the given action items, or every one marked as the user's, unless already sent. */
@@ -203,7 +253,8 @@ export class TodoistPublisher {
     const recording = this.sqlite.query('SELECT original_filename AS filename, recorded_at AS recordedAt, uploaded_at AS uploadedAt FROM recordings WHERE id = ?').get(recordingId) as
       { filename: string | null; recordedAt: string | null; uploadedAt: string | null } | null;
     if (!recording) throw new Error('Recording not found.');
-    const tasks = this.tasks(recordingId).filter(task => keys ? keys.includes(task.key) : task.mine === true);
+    // Without keys: your open tasks. A task already ticked off is not sent unasked.
+    const tasks = this.tasks(recordingId).filter(task => keys ? keys.includes(task.key) : task.mine === true && !task.doneAt);
     const results: SendResult[] = tasks.filter(task => task.sentAt).map(task => ({ key: task.key, title: task.title, action: 'already' }));
     // The same passage can back two titles in one summary; it is still one task.
     const pending = tasks.filter((task, index) => !task.sentAt && tasks.findIndex(other => other.key === task.key) === index);
@@ -234,7 +285,7 @@ export class TodoistPublisher {
     if (!since) return [];
     const rows = this.sqlite.query(`SELECT r.id FROM recordings r JOIN transcripts t ON t.recording_id = r.id
       WHERE r.retention_state = 'active' AND r.status = 'complete' AND t.analyzed_at >= ? AND t.extracted_tasks LIKE '%"mine":true%'`).all(since) as { id: string }[];
-    return rows.map(row => row.id).filter(id => this.tasks(id).some(task => task.mine && !task.sentAt));
+    return rows.map(row => row.id).filter(id => this.tasks(id).some(task => task.mine && !task.sentAt && !task.doneAt));
   }
 
   async run(): Promise<SendResult[]> {

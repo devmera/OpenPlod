@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { todoistApi, describeSend, formatDue, clock, type ActionItem, type TodoistSettings } from '@/lib/todoist'
 import { Button } from '@/components/ui/button'
+import { TaskCheck } from '@/components/TaskCheck'
 import { AlignLeft, Check, Clock3, ListChecks, Loader2, Play, RefreshCw, Send, UserRound } from '@/components/icons'
 
 type Status = { settings: TodoistSettings; lastRun: { at: string; error?: string } | null }
@@ -56,12 +57,14 @@ export function ActionItems({ recordingId, version, full = false, summarized = t
     <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => void summarize()}>{busy === 'summarize' ? <Loader2 className="animate-spin" /> : <AlignLeft />}{summarized ? 'Summarize again' : 'Summarize'}</Button>
     {notice && <small role="status">{notice}</small>}
   </div> : null
-  const unsentMine = items.filter(item => item.mine && !item.sentAt)
+  const unsentMine = items.filter(item => item.mine && !item.sentAt && !item.doneAt)
   // Only your tasks go to Todoist on their own, so progress counts yours; others are sent by hand.
   const mine = items.filter(item => item.mine), mineSent = mine.filter(item => item.sentAt).length
   const othersSent = items.filter(item => !item.mine && item.sentAt).length
 
-  const row = (item: ActionItem) => <li key={item.key + item.title} className={item.mine ? 'mine' : undefined}>
+  const update = (next: ActionItem) => setItems(current => current?.map(item => item.key === next.key ? { ...item, doneAt: next.doneAt } : item) ?? null)
+  const row = (item: ActionItem) => <li key={item.key + item.title} className={[item.mine && 'mine', item.doneAt && 'done'].filter(Boolean).join(' ') || undefined}>
+    <TaskCheck recordingId={recordingId} item={item} onChange={update} onError={setNotice} />
     <span className="action-item-text">
       <span>{item.title}</span>
       <span className="action-item-meta">
@@ -75,7 +78,7 @@ export function ActionItems({ recordingId, version, full = false, summarized = t
     {connected && (item.sentAt
       ? <span className="action-item-sent" title={`Added ${new Date(item.sentAt).toLocaleString()}`}><Check />In Todoist</span>
       : <span className="action-item-actions">
-          {full && auto && item.mine && <span className="action-item-waiting">Waiting to send</span>}
+          {full && auto && item.mine && !item.doneAt && <span className="action-item-waiting">Waiting to send</span>}
           <Button variant="ghost" size="sm" disabled={busy !== null} onClick={() => void send(item.key, [item.key])} aria-label={`Add ${item.title} to Todoist`}>{busy === item.key ? <Loader2 className="animate-spin" /> : <Send />}Todoist</Button>
         </span>)}
   </li>

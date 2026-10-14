@@ -46,6 +46,7 @@ import { RecordingSearch } from '@/components/RecordingSearch'
 import { highlightText, searchRecording, type SummaryLine } from '@/lib/recording-search'
 import { ProcessingState } from '@/components/ProcessingState'
 import { useProcessing, type Processing } from '@/lib/processing'
+import { ActionItems } from '@/components/ActionItems'
 import { api, speakerLabel, type Recording, type TranscriptSegment, type TranscriptVersion } from '@/lib/api'
 import { useLibraryChanges } from '@/lib/library-changes'
 import { formatDuration } from '@/lib/utils'
@@ -515,7 +516,7 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
                 <div className="summary-document markdown-document" ref={summaryView}>
                   {summaryMarkdown}
                   {!!recording.summaryKeyPoints?.length && <><h2>Key points</h2><ul>{recording.summaryKeyPoints.map((point, index) => <li key={index}>{highlightText(point, query)}</li>)}</ul></>}
-                  {!!recording.actionItems?.length && <><h2>Action items</h2><ul className="summary-tasks">{recording.actionItems.map((item, index) => <li key={index}><input type="checkbox" disabled aria-label="Action item" />{highlightText(item, query)}</li>)}</ul></>}
+                  {!!recording.actionItems?.length && <ActionItems recordingId={recording.id} version={recording.actionItems.join('\n')} />}
                   {!!recording.summaryTopics?.length && <p className="summary-topics"><strong>Topics:</strong> {highlightText(recording.summaryTopics.join(', '), query)}</p>}
                   <div className="summary-regenerate"><Button variant="ghost" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <RotateCcw />}Summarize again</Button></div>
                 </div>

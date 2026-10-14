@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { api, type Settings } from '@/lib/api'
 import { getRuntime } from '@/lib/runtime'
 import { buildInfo, buildLabel } from '@/lib/build-info'
+import { TodoistPanel } from '@/components/TodoistPanel'
 import { AiSettingsPanel } from '@/components/AiSettingsPanel'
 import { MeetingRecorderPanel } from '@/components/MeetingRecorderPanel'
 import { SpeakersPanel } from '@/components/SpeakersPanel'
@@ -132,6 +133,7 @@ export function SettingsPage() {
       <SpeakersPanel />
 
       <ObsidianPanel />
+      <TodoistPanel />
 
       {/* Sync */}
       <Card>

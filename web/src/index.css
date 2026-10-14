@@ -628,3 +628,18 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .confirm-dialog { position: fixed; z-index: 91; left: 50%; top: 50%; width: min(420px, calc(100vw - 32px)); transform: translate(-50%, -50%); display: grid; gap: 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); padding: 22px; box-shadow: 0 20px 50px rgb(0 0 0 / 0.35); }
 .confirm-message { margin: 0; font-size: 14px; font-weight: 500; line-height: 1.5; color: var(--foreground); }
 .confirm-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+/* Action items with Todoist sending */
+.action-items { margin-top: 14px; font-size: 12px; }
+.action-items-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.action-items-heading h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.action-items ul { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.action-items li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.action-items li:last-child { border-bottom: 0; }
+.action-item-text { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.action-item-meta { display: flex; flex-wrap: wrap; gap: 10px; color: var(--muted-foreground); font-size: 11px; }
+.action-item-meta span, .action-item-sent { display: inline-flex; align-items: center; gap: 4px; }
+.action-item-meta svg, .action-item-sent svg { width: 12px; height: 12px; }
+.action-items li.mine .action-item-owner { color: var(--primary); }
+.action-item-sent { flex-shrink: 0; color: var(--muted-foreground); font-size: 11px; }
+.action-items li button { flex-shrink: 0; gap: 4px; }
+.action-items-notice { margin: 6px 0 0; color: var(--muted-foreground); font-size: 11px; }

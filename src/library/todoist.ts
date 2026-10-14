@@ -73,7 +73,28 @@ const statusError = (status: Status | undefined) => status === undefined ? 'Todo
 export interface TodoistSettings { connected: boolean; projectId: string; auto: boolean; principal: string }
 export interface SettingsInput { token?: string; projectId: string; auto: boolean; principal: string }
 interface StoredTask { title: string; description?: string; assignee?: string; dueDate?: string; dueEvidence?: string; mine?: boolean; context: string }
-export interface RecordingTask extends StoredTask { key: string; todoistId: string | null; sentAt: string | null }
+/** `start` is where the quote behind the task begins in the audio, in seconds, when it can be found. */
+export interface RecordingTask extends StoredTask { key: string; todoistId: string | null; sentAt: string | null; start: number | null }
+export interface MeetingTasks { recordingId: string; title: string; recordedAt: string | null; tasks: RecordingTask[] }
+
+const words = (text: string) => text.toLocaleLowerCase().normalize('NFKC').match(/[\p{L}\p{N}]+/gu) ?? [];
+/**
+ * Where a quote begins: the segment starting the run of up to three consecutive segments that holds
+ * most of the quote's words. Of equally good runs the latest start wins, since earlier runs only add
+ * unrelated lines before the quote. Null when under half the words are found.
+ */
+export function quoteStart(quote: string, segments: { start?: number; text?: string }[]): number | null {
+  const wanted = words(quote);
+  if (!wanted.length) return null;
+  let best = -1, score = 0;
+  segments.forEach((_, index) => {
+    const bag = new Set(segments.slice(index, index + 3).flatMap(segment => words(segment.text ?? '')));
+    const found = wanted.filter(word => bag.has(word)).length / wanted.length;
+    if (found >= score) { best = index; score = found; }
+  });
+  const start = segments[best]?.start;
+  return best !== -1 && score >= 0.5 && typeof start === 'number' ? start : null;
+}
 export interface SendResult { key: string; title: string; action: 'created' | 'already' | 'failed'; reason?: string }
 
 const recordingTitle = (filename: string | null) => (filename || 'Recording').replace(/\.[a-z0-9]{2,4}$/i, '').replace(/[-_]+/g, ' ').trim();
@@ -147,17 +168,33 @@ export class TodoistPublisher {
 
   async projects(): Promise<TodoistProject[]> { return (await this.api().read()).projects; }
 
-  /** A recording's action items, each with whether it is already in Todoist. */
+  /** A recording's action items, each with whether it is already in Todoist and where it was said. */
   tasks(recordingId: string): RecordingTask[] {
-    const row = this.sqlite.query('SELECT extracted_tasks AS tasks FROM transcripts WHERE recording_id = ?').get(recordingId) as { tasks: string | null } | null;
-    let stored: StoredTask[] = [];
-    try { stored = row?.tasks ? (JSON.parse(row.tasks) as StoredTask[]).filter(task => task?.title && task.context) : []; } catch { stored = []; }
+    const row = this.sqlite.query('SELECT extracted_tasks AS tasks, segments FROM transcripts WHERE recording_id = ?').get(recordingId) as { tasks: string | null; segments: string | null } | null;
+    return row ? this.withState(recordingId, row.tasks, row.segments) : [];
+  }
+
+  /** Every active recording's action items, newest recording first. */
+  allTasks(): MeetingTasks[] {
+    const rows = this.sqlite.query(`SELECT r.id, r.original_filename AS filename, COALESCE(r.recorded_at, r.uploaded_at) AS recordedAt, t.extracted_tasks AS tasks, t.segments
+      FROM recordings r JOIN transcripts t ON t.recording_id = r.id
+      WHERE r.retention_state = 'active' AND t.extracted_tasks IS NOT NULL AND t.extracted_tasks != '[]'
+      ORDER BY COALESCE(r.recorded_at, r.uploaded_at) DESC`).all() as { id: string; filename: string | null; recordedAt: string | null; tasks: string; segments: string | null }[];
+    return rows.map(row => ({ recordingId: row.id, title: recordingTitle(row.filename), recordedAt: row.recordedAt, tasks: this.withState(row.id, row.tasks, row.segments) }))
+      .filter(meeting => meeting.tasks.length);
+  }
+
+  private withState(recordingId: string, tasksJson: string | null, segmentsJson: string | null): RecordingTask[] {
+    let stored: StoredTask[] = [], segments: { start?: number; text?: string }[] = [];
+    try { stored = tasksJson ? (JSON.parse(tasksJson) as StoredTask[]).filter(task => task?.title && task.context) : []; } catch { stored = []; }
+    try { segments = segmentsJson ? JSON.parse(segmentsJson) : []; } catch { segments = []; }
+    if (!Array.isArray(segments)) segments = [];
     const sent = this.sqlite.query('SELECT task_key AS key, evidence, todoist_id AS todoistId, sent_at AS sentAt FROM todoist_tasks WHERE recording_id = ?').all(recordingId) as
       { key: string; evidence: string; todoistId: string | null; sentAt: string }[];
     return stored.map(task => {
       const key = taskKey(recordingId, task.context);
       const match = sent.find(item => item.key === key) ?? sent.find(item => evidenceOverlaps(item.evidence, task.context));
-      return { ...task, key, todoistId: match?.todoistId ?? null, sentAt: match?.sentAt ?? null };
+      return { ...task, key, todoistId: match?.todoistId ?? null, sentAt: match?.sentAt ?? null, start: quoteStart(task.context, segments) };
     });
   }
 

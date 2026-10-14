@@ -562,7 +562,7 @@ export function RecordingPreview({
             )}
           </div>
         )}
-        {tab === "Tasks" && <ActionItems full recordingId={id} summarized={Boolean(recording?.summary)} version={`${recording?.summary ?? ""}\n${recording?.actionItems?.join("\n") ?? ""}`} />}
+        {tab === "Tasks" && <ActionItems full onSeek={(seconds) => { seek(seconds); void wave.current?.play(); }} recordingId={id} summarized={Boolean(recording?.summary)} version={`${recording?.summary ?? ""}\n${recording?.actionItems?.join("\n") ?? ""}`} />}
         {tab === "Notes" && (
           <div className="preview-notes">
             <label htmlFor="preview-notes">Recording notes</label>

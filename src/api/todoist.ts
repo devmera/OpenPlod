@@ -20,6 +20,7 @@ export function createTodoistApi(publisher: TodoistPublisher) {
     try { return c.json({ success: true, data: await publisher.projects() }); }
     catch (error) { return c.json({ success: false, error: failure(error, 'Could not read Todoist projects.') }, 502); }
   });
+  app.get('/tasks', c => c.json({ success: true, data: { connected: publisher.settings().connected, meetings: publisher.allTasks() } }));
   app.get('/recordings/:id', c => c.json({ success: true, data: { connected: publisher.settings().connected, tasks: publisher.tasks(c.req.param('id')) } }));
   /** `{ keys }` sends those action items; without keys, every one marked as yours. */
   app.post('/recordings/:id', async c => {

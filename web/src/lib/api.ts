@@ -378,7 +378,7 @@ interface RawTranscript {
   origin?: 'generated' | 'edited'
   currentVersionId?: string | null
   segments?: RawTranscriptSegment[] | string
-  summary?: { overview?: string } | string
+  summary?: { overview?: string; notes?: string } | string
   extractedTasks?: Array<string | { title?: string }>
 }
 
@@ -479,7 +479,7 @@ function mapRecording(r: RawRecording): Recording {
     hasTranscript: r.hasTranscript ?? Boolean(transcript?.fullText?.trim()),
     transcriptOrigin: transcript?.origin,
     transcriptVersionId: transcript?.currentVersionId,
-    summary: transcript?.summary ? (typeof transcript.summary === 'string' ? transcript.summary : transcript.summary.overview) : undefined,
+    summary: transcript?.summary ? (typeof transcript.summary === 'string' ? transcript.summary : [transcript.summary.overview, transcript.summary.notes].filter(Boolean).join('\n\n')) || undefined : undefined,
     actionItems: transcript?.extractedTasks
       ?.map(item => typeof item === 'string' ? item : item.title)
       .filter((item): item is string => Boolean(item)),

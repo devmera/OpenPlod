@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { api } from '@/lib/api'
 import { todoistApi, describeSend, formatDue, type ActionItem, type TodoistSettings } from '@/lib/todoist'
 import { Button } from '@/components/ui/button'
-import { Check, Clock3, ListChecks, Loader2, RefreshCw, Send, UserRound } from '@/components/icons'
+import { AlignLeft, Check, Clock3, ListChecks, Loader2, RefreshCw, Send, UserRound } from '@/components/icons'
 
 type Status = { settings: TodoistSettings; lastRun: { at: string; error?: string } | null }
 type Group = { owner: string; mine: boolean; items: ActionItem[] }
@@ -27,7 +28,7 @@ const time = (iso: string) => new Date(iso).toLocaleString(undefined, { month: '
  * grouped by owner with the Todoist connection and each task's sync state; otherwise a flat list.
  * `version` reloads the list after a new summary.
  */
-export function ActionItems({ recordingId, version, full = false }: { recordingId: string; version?: string | null; full?: boolean }) {
+export function ActionItems({ recordingId, version, full = false, summarized = true }: { recordingId: string; version?: string | null; full?: boolean; summarized?: boolean }) {
   const [items, setItems] = useState<ActionItem[] | null>(null), [status, setStatus] = useState<Status | null>(null)
   const [busy, setBusy] = useState<string | null>(null), [notice, setNotice] = useState('')
   const load = useCallback(async () => {
@@ -40,9 +41,20 @@ export function ActionItems({ recordingId, version, full = false }: { recordingI
     try { setNotice(describeSend(await todoistApi.send(recordingId, keys))) } catch (e) { setNotice(e instanceof Error ? e.message : 'Could not send to Todoist.') }
     finally { setBusy(null); void load() }
   }
+  const summarize = async () => {
+    setBusy('summarize'); setNotice('')
+    try { await api.summarize(recordingId); setNotice('Summarizing. Tasks appear here when it finishes.'); void load() }
+    catch (e) { setNotice(e instanceof Error ? e.message : 'Could not summarize.') }
+    finally { setBusy(null) }
+  }
   const connected = Boolean(status?.settings.connected), auto = connected && Boolean(status?.settings.auto)
   if (items === null) return full ? <div className="action-items-empty"><Loader2 className="animate-spin" /></div> : null
-  if (!items.length) return full ? <div className="action-items-empty"><ListChecks /><p>No tasks were identified in this recording.</p><small>Tasks appear after the recording is summarized.</small></div> : null
+  if (!items.length) return full ? <div className="action-items-empty"><ListChecks />
+    <p>{summarized ? 'No tasks were identified in this recording.' : 'This recording has not been summarized yet.'}</p>
+    <small>{summarized ? 'Summarize again to look for tasks once more.' : 'Tasks are found when the recording is summarized.'}</small>
+    <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => void summarize()}>{busy === 'summarize' ? <Loader2 className="animate-spin" /> : <AlignLeft />}{summarized ? 'Summarize again' : 'Summarize'}</Button>
+    {notice && <small role="status">{notice}</small>}
+  </div> : null
   const unsentMine = items.filter(item => item.mine && !item.sentAt)
   const sent = items.filter(item => item.sentAt).length
 

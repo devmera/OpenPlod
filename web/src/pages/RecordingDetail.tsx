@@ -25,6 +25,7 @@ import {
   AlignLeft,
   AudioLines,
   ListTree,
+  ListChecks,
   Trash2,
   Upload,
   Wand2,
@@ -55,7 +56,7 @@ import { deviceCommand, supportsPlaudDevice, vaultArguments } from '@/lib/plaud-
 import { confirmAction } from '@/lib/confirm'
 
 type BusyAction = 'transcribing' | 'summarizing' | 'saving' | 'forwarding' | null
-type DocumentMode = 'summary' | 'preview' | 'edit' | 'timestamps' | 'studio'
+type DocumentMode = 'summary' | 'preview' | 'edit' | 'timestamps' | 'studio' | 'tasks'
 
 /**
  * One spoken segment, with the active word highlighted when the provider gave
@@ -495,8 +496,8 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
       <div className="recording-workspace">
         <main className="document-pane">
           <div className="document-toolbar">
-            <ToggleGroup type="single" className="document-modes" value={documentMode} onValueChange={value => { if (value === 'summary' || value === 'preview' || value === 'edit' || value === 'timestamps' || value === 'studio') { if (value === 'edit') setSelectedVersion(null); setDocumentMode(value) } }} aria-label="Transcript view">
-              <ToggleGroupItem value="summary"><AlignLeft />Summary</ToggleGroupItem><ToggleGroupItem value="preview"><FileText />Markdown</ToggleGroupItem><ToggleGroupItem value="edit"><Pencil />Edit</ToggleGroupItem><ToggleGroupItem value="timestamps"><ListTree />Transcript</ToggleGroupItem><ToggleGroupItem value="studio"><Wand2 />Studio</ToggleGroupItem>
+            <ToggleGroup type="single" className="document-modes" value={documentMode} onValueChange={value => { if (value === 'summary' || value === 'preview' || value === 'edit' || value === 'timestamps' || value === 'studio' || value === 'tasks') { if (value === 'edit') setSelectedVersion(null); setDocumentMode(value) } }} aria-label="Transcript view">
+              <ToggleGroupItem value="summary"><AlignLeft />Summary</ToggleGroupItem><ToggleGroupItem value="tasks"><ListChecks />Tasks</ToggleGroupItem><ToggleGroupItem value="preview"><FileText />Markdown</ToggleGroupItem><ToggleGroupItem value="edit"><Pencil />Edit</ToggleGroupItem><ToggleGroupItem value="timestamps"><ListTree />Transcript</ToggleGroupItem><ToggleGroupItem value="studio"><Wand2 />Studio</ToggleGroupItem>
             </ToggleGroup>
             {documentMode === 'edit' && (
               <Button size="sm" onClick={() => void saveTranscript()} disabled={action !== null || recording.transcriptText === undefined}><Save />Save version</Button>
@@ -511,12 +512,13 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
           )}
 
           <article className="document-surface">
-            {documentMode === 'summary' ? (
+            {documentMode === 'tasks' ? (
+              <div className="document-tasks"><ActionItems full recordingId={recording.id} error={recording.errorMessage?.startsWith('Summary failed') ? recording.errorMessage : null} summarized={Boolean(recording.summary)} onSeek={seconds => seekTo(seconds)} version={`${recording.summary ?? ''}\n${recording.actionItems?.join('\n') ?? ''}`} /></div>
+            ) : documentMode === 'summary' ? (
               hasSummary && !processing ? (
                 <div className="summary-document markdown-document" ref={summaryView}>
                   {summaryMarkdown}
                   {!!recording.summaryKeyPoints?.length && <><h2>Key points</h2><ul>{recording.summaryKeyPoints.map((point, index) => <li key={index}>{highlightText(point, query)}</li>)}</ul></>}
-                  {!!recording.actionItems?.length && <ActionItems recordingId={recording.id} version={recording.actionItems.join('\n')} />}
                   {!!recording.summaryTopics?.length && <p className="summary-topics"><strong>Topics:</strong> {highlightText(recording.summaryTopics.join(', '), query)}</p>}
                   <div className="summary-regenerate"><Button variant="ghost" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <RotateCcw />}Summarize again</Button></div>
                 </div>

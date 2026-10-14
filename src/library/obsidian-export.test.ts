@@ -33,8 +33,9 @@ const changeTranscript = (summary: string) => {
 test('renders summary, deduplicated action items and the transcript by speaker turn', () => {
   const note = { id: 'r1', title: 'x', recordedAt: '2026-10-13T13:26:00Z', durationSeconds: 3, sourceProvider: 'plaud', recordingType: 'meeting', fullText: '',
     segments: [{ start: 0, text: 'Hej.', speaker: 'Joakim' }, { start: 1, text: 'Igen.', speaker: 'Joakim' }, { start: 65, text: 'Hi.', speaker: 0 }],
-    summary: { overview: 'O' }, tasks: [{ title: 'A' }, { title: 'a' }] } satisfies NoteSource;
+    summary: { overview: 'O', notes: '### Topic\n- Detail' }, tasks: [{ title: 'A' }, { title: 'a' }] } satisfies NoteSource;
   const block = renderBlock(note);
+  expect(block).toContain('O\n\n### Topic\n- Detail\n');
   expect(block).toContain('- [ ] A\n\n');
   expect(block).toContain('**Joakim** · 0:00\nHej. Igen.\n\n**Speaker 1** · 1:05\nHi.');
 });

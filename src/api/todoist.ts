@@ -20,8 +20,21 @@ export function createTodoistApi(publisher: TodoistPublisher) {
     try { return c.json({ success: true, data: await publisher.projects() }); }
     catch (error) { return c.json({ success: false, error: failure(error, 'Could not read Todoist projects.') }, 502); }
   });
-  app.get('/tasks', c => c.json({ success: true, data: { connected: publisher.settings().connected, meetings: publisher.allTasks() } }));
-  app.get('/recordings/:id', c => c.json({ success: true, data: { connected: publisher.settings().connected, tasks: publisher.tasks(c.req.param('id')) } }));
+  app.get('/tasks', async c => {
+    await publisher.pullCompletion();
+    return c.json({ success: true, data: { connected: publisher.settings().connected, meetings: publisher.allTasks() } });
+  });
+  /** `{ key, done }` ticks a task off or back on, in Todoist too when it was sent there. */
+  app.post('/recordings/:id/done', async c => {
+    const body = z.object({ key: z.string().max(64), done: z.boolean() }).safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ success: false, error: 'Task and state are required.' }, 400);
+    try { return c.json({ success: true, data: await publisher.setDone(c.req.param('id'), body.data.key, body.data.done) }); }
+    catch (error) { return c.json({ success: false, error: failure(error, 'Could not update the task.') }, 502); }
+  });
+  app.get('/recordings/:id', async c => {
+    await publisher.pullCompletion();
+    return c.json({ success: true, data: { connected: publisher.settings().connected, tasks: publisher.tasks(c.req.param('id')) } });
+  });
   /** `{ keys }` sends those action items; without keys, every one marked as yours. */
   app.post('/recordings/:id', async c => {
     const body = z.object({ keys: z.array(z.string().max(64)).max(50).optional() }).safeParse(await c.req.json().catch(() => ({})));

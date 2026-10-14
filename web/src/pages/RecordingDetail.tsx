@@ -510,8 +510,8 @@ export function RecordingDetail({ backPath = '/' }: { backPath?: string }) {
 
           <section>
             <div className="inspector-heading"><span>Summary</span><AlignLeft /></div>
-            {recording.summary ? <div className="inspector-summary">{summaryMarkdown}</div> : (
-              processing ? <ProcessingState processing={processing} compact /> : <div className="inspector-empty"><p>{recording.errorMessage?.startsWith('Summary failed') ? recording.errorMessage : 'No summary yet.'}</p><Button variant="outline" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <AlignLeft />}Generate</Button></div>
+            {processing ? <ProcessingState processing={processing} compact /> : recording.summary ? <div className="inspector-summary">{summaryMarkdown}</div> : (
+              <div className="inspector-empty"><p>{recording.errorMessage?.startsWith('Summary failed') ? recording.errorMessage : 'No summary yet.'}</p><Button variant="outline" size="sm" onClick={() => void runAction('summarizing')} disabled={action !== null}>{action === 'summarizing' ? <Loader2 className="animate-spin" /> : <AlignLeft />}Generate</Button></div>
             )}
           </section>
 

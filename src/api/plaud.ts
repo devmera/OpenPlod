@@ -11,6 +11,7 @@ import { recordings, userSettings } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import { configuredSyncPath, fingerprintFile, importRecordingFile, incomingDirectory, safeFilename } from '../library/recording-library';
 import { queueRecordingProcessing } from '../library/processing';
+import { jobQueue } from '../jobs/queue';
 import { saveGeneratedTranscript } from '../library/transcript-history';
 import { FolderWatcher } from '../sync/folder-watcher';
 import { scanDesktopPlaud } from '../sync/desktop-plaud';
@@ -261,7 +262,7 @@ async function storeCloudTranscript(params: {
   recording: PlaudCloudRecording;
   recordingId: string;
   job: CloudImportJob;
-}): Promise<boolean> {
+}): Promise<'new' | 'unchanged' | false> {
   const { client, recording, recordingId, job } = params;
   try {
     // Plaud's own `is_trans` flag is unreliable: recordings it marks as
@@ -295,7 +296,7 @@ async function storeCloudTranscript(params: {
       job.transcripts += 1;
       if (summary) job.summaries += 1;
     }
-    return true;
+    return stored ? 'new' : 'unchanged';
   } catch (error) {
     job.transcriptFailures.push({
       sourceId: recording.id,
@@ -357,9 +358,14 @@ async function runCloudImport(params: {
         title: result.recording.originalFilename, added: result.added,
       });
       if (transcribed) {
-        // Plaud already wrote the transcript and summary, so there is nothing
-        // left to process locally.
+        // Plaud already wrote the transcript, so there is nothing to transcribe locally. Its summary has
+        // no action items, so a new transcript is still summarized here when automatic summaries are on.
         await db.update(recordings).set({ status: 'complete' }).where(eq(recordings.id, result.recording.id)).run();
+        const [auto] = await db.select({ value: userSettings.value }).from(userSettings).where(eq(userSettings.key, 'autoSummarize'));
+        if (transcribed === 'new' && auto?.value === 'true') {
+          await db.update(recordings).set({ status: 'pending' }).where(eq(recordings.id, result.recording.id)).run();
+          await jobQueue.add('summarize-recording', { recordingId: result.recording.id });
+        }
       } else if (result.added) {
         await queueRecordingProcessing({ recordingId: result.recording.id, filePath: result.recording.filePath });
       }

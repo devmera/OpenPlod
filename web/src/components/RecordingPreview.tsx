@@ -577,6 +577,9 @@ export function RecordingPreview({
               <ProcessingState processing={processing} compact />
             ) : recording?.summary ? (
               <>
+                {recording.errorMessage?.startsWith("Summary failed") && (
+                  <p className="preview-summary-failed" role="alert">{recording.errorMessage} The summary below is the previous one.</p>
+                )}
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {recording.summary}
                 </ReactMarkdown>
